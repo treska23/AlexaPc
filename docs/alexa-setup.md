@@ -1,72 +1,83 @@
-# Conectar AlexaPc al relay y a Alexa
+# Conectar AlexaPc a Alexa
 
-## 1. Probar el canal remoto en local
+## 1. Canal local — ya probado
 
-El agente crea automáticamente:
+Con `AlexaPc Local` arrancado, el recorrido local es:
 
 ```text
-%LOCALAPPDATA%\AlexaPc\relay.json
+HTTP -> Relay local -> WebSocket -> AlexaPc.Agent -> CommandDispatcher -> Windows
 ```
 
-Por defecto contiene:
+Si una petición a `/api/commands` abre YouTube, esta parte está terminada.
 
-```json
-{
-  "enabled": true,
-  "relayUrl": "ws://localhost:5184/ws/agent",
-  "deviceId": "pc-principal",
-  "deviceToken": "dev-device-token"
-}
+## 2. Crear el relay cloud estable
+
+Alexa no puede acceder a `localhost`. Para uso real, AlexaPc usa un relay en Cloudflare Workers + Durable Objects. El Worker está en:
+
+```text
+cloudflare/worker
 ```
 
-Arranca primero `AlexaPc.Relay` y después `AlexaPc.Agent`. En la aplicación debe aparecer:
+Hay un script que despliega el Worker, crea dos claves aleatorias, guarda los secretos en Cloudflare y cambia automáticamente `%LOCALAPPDATA%\AlexaPc\relay.json` para que el agente use WSS:
+
+```powershell
+.\scripts\Deploy-CloudRelay.ps1
+```
+
+Requisitos:
+
+- Node.js/npm instalado.
+- Una cuenta gratuita de Cloudflare. La primera ejecución abre el navegador para iniciar sesión.
+
+Al terminar, el script muestra una URL estable similar a:
+
+```text
+https://alexapc-relay.<tu-subdominio>.workers.dev
+```
+
+y configura el PC con:
+
+```text
+wss://alexapc-relay.<tu-subdominio>.workers.dev/ws/agent
+```
+
+La configuración privada necesaria para la Skill queda solamente en este PC:
+
+```text
+%LOCALAPPDATA%\AlexaPc\cloud-relay.json
+```
+
+No se suben las claves al repositorio.
+
+Después de ejecutar el script, reinicia AlexaPc. La aplicación debe volver a marcar:
 
 ```text
 RELAY · CONECTADO
 ```
 
-Para probar una orden sin Alexa, ejecuta en PowerShell:
+## 3. Probar el relay cloud
+
+Abre `%LOCALAPPDATA%\AlexaPc\cloud-relay.json`. Contiene `relayUrl`, `apiKey` y `deviceId`.
+
+Prueba primero:
 
 ```powershell
-Invoke-RestMethod `
-  -Method Post `
-  -Uri "http://localhost:5184/api/commands" `
-  -Headers @{ "X-AlexaPc-Api-Key" = "dev-api-key" } `
-  -ContentType "application/json" `
-  -Body '{"deviceId":"pc-principal","command":"youtube"}'
+Invoke-RestMethod "https://TU-WORKER.workers.dev/health"
 ```
 
-Si el navegador abre YouTube, el recorrido completo ya funciona:
+Después prueba una orden usando la `apiKey` guardada:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "https://TU-WORKER.workers.dev/api/commands" -Headers @{"X-AlexaPc-Api-Key"="TU_API_KEY"} -ContentType "application/json" -Body '{"deviceId":"pc-principal","command":"youtube"}'
+```
+
+Si abre YouTube, ya funciona también desde Internet:
 
 ```text
-HTTP -> Relay -> WebSocket -> AlexaPc.Agent -> CommandDispatcher -> Windows
+Internet -> Cloudflare Worker -> WebSocket -> AlexaPc.Agent -> Windows
 ```
 
-## 2. Publicar el relay
-
-Alexa no puede acceder a `localhost`. Para usar voz, `AlexaPc.Relay` debe estar publicado detrás de HTTPS/WSS.
-
-Configura estas variables de entorno en el servidor:
-
-```text
-ALEXAPC_DEVICE_TOKEN=<token largo y aleatorio>
-ALEXAPC_API_KEY=<clave larga y aleatoria>
-```
-
-En el PC cambia `relay.json` a la URL WSS pública y usa el mismo `ALEXAPC_DEVICE_TOKEN`:
-
-```json
-{
-  "enabled": true,
-  "relayUrl": "wss://tu-dominio.example/ws/agent",
-  "deviceId": "pc-principal",
-  "deviceToken": "TU_TOKEN"
-}
-```
-
-No publiques el relay usando las claves `dev-*`.
-
-## 3. Crear la Skill
+## 4. Crear la Skill
 
 El modelo español está en:
 
@@ -74,7 +85,7 @@ El modelo español está en:
 skill/es-ES/interactionModel.json
 ```
 
-La invocación elegida es:
+La invocación actual es:
 
 ```text
 control pc
@@ -86,17 +97,17 @@ El código de Lambda está en:
 skill/lambda/index.mjs
 ```
 
-Variables de entorno de Lambda:
+Variables de entorno de la Skill/Lambda:
 
 ```text
-RELAY_URL=https://tu-dominio.example
-RELAY_API_KEY=TU_API_KEY
+RELAY_URL=https://TU-WORKER.workers.dev
+RELAY_API_KEY=<apiKey de cloud-relay.json>
 DEVICE_ID=pc-principal
 ```
 
-La Lambda debe añadirse como endpoint de la Custom Skill de Alexa.
+El modelo usa `AMAZON.SearchQuery` para capturar nombres de comandos abiertos como `YouTube`, `bloc de notas`, etc.
 
-## 4. Qué decir exactamente
+## 5. Qué decir exactamente
 
 Una vez la Skill esté enlazada y habilitada:
 
@@ -110,10 +121,10 @@ Alexa responderá preguntando qué quieres hacer. Entonces:
 abre YouTube
 ```
 
-También probaremos la invocación en una sola frase cuando la Skill esté instalada:
+También puede usarse una sola frase:
 
 ```text
 Alexa, dile a control PC que abra YouTube.
 ```
 
-Los nombres que Alexa manda deben corresponder a nombres de `commands.json`. El relay nunca manda scripts arbitrarios al PC.
+Los nombres recibidos deben corresponder a comandos de `commands.json`. AlexaPc nunca acepta código arbitrario desde Internet.
