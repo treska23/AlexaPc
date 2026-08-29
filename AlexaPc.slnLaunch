@@ -1,0 +1,15 @@
+[
+  {
+    "Name": "AlexaPc Local",
+    "Projects": [
+      {
+        "Path": "src\\AlexaPc.Relay\\AlexaPc.Relay.csproj",
+        "Action": "StartWithoutDebugging"
+      },
+      {
+        "Path": "src\\AlexaPc.Agent\\AlexaPc.Agent.csproj",
+        "Action": "Start"
+      }
+    ]
+  }
+]
