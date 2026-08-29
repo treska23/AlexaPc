@@ -6,7 +6,7 @@ export const handler = async (event) => {
   const request = event?.request ?? {};
 
   if (request.type === "LaunchRequest") {
-    return ask("Control PC listo. ¿Qué quieres que haga?", "Puedes decir, por ejemplo, abre YouTube.");
+    return ask("Bardo listo. ¿Qué quieres que haga?", "Puedes decir, por ejemplo, abre YouTube.");
   }
 
   if (request.type === "IntentRequest") {
@@ -34,7 +34,7 @@ export const handler = async (event) => {
     }
 
     if (intentName === "AMAZON.FallbackIntent") {
-      return ask("No he reconocido esa orden de AlexaPc.", "Prueba con abre YouTube.");
+      return ask("No he reconocido esa orden de Bardo.", "Prueba con abre YouTube.");
     }
   }
 
@@ -49,7 +49,7 @@ async function executeRemoteCommand(command) {
   if (!relayUrl || !apiKey) {
     return {
       success: false,
-      message: "La conexión de Control PC todavía no está configurada."
+      message: "La conexión de Bardo todavía no está configurada."
     };
   }
 
