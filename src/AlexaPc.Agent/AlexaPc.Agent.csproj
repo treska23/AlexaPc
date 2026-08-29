@@ -7,5 +7,10 @@
     <Nullable>enable</Nullable>
     <AssemblyName>AlexaPc</AssemblyName>
     <RootNamespace>AlexaPc.Agent</RootNamespace>
+    <ApplicationIcon>Assets\AlexaPc.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\AlexaPc.ico" />
+  </ItemGroup>
 </Project>
