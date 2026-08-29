@@ -2,95 +2,170 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AlexaPc"
-        Width="900"
-        Height="620"
-        MinWidth="680"
-        MinHeight="460"
+        Width="980"
+        Height="680"
+        MinWidth="760"
+        MinHeight="520"
         WindowStartupLocation="CenterScreen">
-    <Grid Margin="24">
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="18" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="18" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <StackPanel>
-                <TextBlock Text="AlexaPc" FontSize="32" FontWeight="SemiBold" />
-                <TextBlock Text="Agente local de control de Windows" Foreground="{StaticResource MutedTextBrush}" FontSize="14" />
-            </StackPanel>
-
-            <Border Grid.Column="1" Background="{StaticResource PanelBrush}" CornerRadius="8" Padding="12,8" VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal">
-                    <Ellipse Width="9" Height="9" Fill="{StaticResource AccentBrush}" Margin="0,0,8,0" />
-                    <TextBlock Text="LOCAL" FontWeight="SemiBold" />
-                </StackPanel>
-            </Border>
-        </Grid>
-
-        <Border Grid.Row="2" Background="{StaticResource PanelBrush}" CornerRadius="10" Padding="14">
+        <!-- Brand header -->
+        <Border Grid.Row="0" Background="{StaticResource AmazonNavyBrush}" Padding="28,22">
             <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="10" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel>
-                        <TextBlock Text="Comandos" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Selecciona uno para probar exactamente lo que ejecutará Alexa." Foreground="{StaticResource MutedTextBrush}" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Grid Width="46" Height="46" Margin="0,0,14,0">
+                        <Ellipse Stroke="{StaticResource AlexaCyanBrush}" StrokeThickness="5" />
+                        <Ellipse Width="10" Height="10" Fill="{StaticResource AlexaCyanBrush}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,1,1" />
+                    </Grid>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="AlexaPc" Foreground="White" FontSize="30" FontWeight="SemiBold" />
+                        <TextBlock Text="Control de Windows por voz" Foreground="#B8C7D4" FontSize="13" />
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal">
-                        <Button Content="Abrir commands.json" Command="{Binding OpenConfigurationCommand}" />
-                        <Button Content="Recargar" Command="{Binding ReloadCommand}" Margin="0" />
-                    </StackPanel>
-                </Grid>
+                </StackPanel>
 
-                <ListView Grid.Row="2"
-                          ItemsSource="{Binding Commands}"
-                          SelectedItem="{Binding SelectedCommand}"
-                          Background="#151515"
-                          Foreground="{StaticResource TextBrush}"
-                          BorderThickness="0">
-                    <ListView.View>
-                        <GridView>
-                            <GridViewColumn Header="Nombre" Width="210" DisplayMemberBinding="{Binding Name}" />
-                            <GridViewColumn Header="Tipo" Width="110" DisplayMemberBinding="{Binding Type}" />
-                            <GridViewColumn Header="Descripción" Width="390" DisplayMemberBinding="{Binding Description}" />
-                        </GridView>
-                    </ListView.View>
-                </ListView>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#163D31" CornerRadius="8" Padding="12,8" Margin="0,0,10,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Fill="{StaticResource SuccessBrush}" Margin="0,0,7,0" />
+                            <TextBlock Text="PC LOCAL · LISTO" Foreground="White" FontSize="12" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="#4A3520" CornerRadius="8" Padding="12,8">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Fill="{StaticResource AmazonOrangeBrush}" Margin="0,0,7,0" />
+                            <TextBlock Text="ALEXA · SIN CONECTAR" Foreground="White" FontSize="12" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+        <Grid Grid.Row="1" Margin="28,24,28,24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-            <StackPanel VerticalAlignment="Center">
-                <TextBlock Text="{Binding Status}" />
-                <TextBlock Text="{Binding ConfigurationPath}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" TextTrimming="CharacterEllipsis" />
-            </StackPanel>
+            <!-- Alexa integration notice -->
+            <Border Grid.Row="0"
+                    Background="{StaticResource WarningBackgroundBrush}"
+                    BorderBrush="#FFD28B"
+                    BorderThickness="1"
+                    CornerRadius="10"
+                    Padding="16,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="30" Height="30" Background="{StaticResource AmazonOrangeBrush}" CornerRadius="15" Margin="0,0,12,0">
+                        <TextBlock Text="!" Foreground="{StaticResource AmazonNavyBrush}" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Alexa todavía no está conectada a esta aplicación." FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
+                        <TextBlock Text="Los comandos de esta pantalla funcionan localmente. La conexión de voz será el siguiente módulo." Foreground="#705027" FontSize="12" Margin="0,2,0,0" />
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-            <Button Grid.Column="1"
-                    Content="Ejecutar comando"
-                    Command="{Binding ExecuteSelectedCommand}"
-                    Padding="20,10"
-                    Margin="16,0,0,0" />
+            <!-- Commands card -->
+            <Border Grid.Row="2"
+                    Background="{StaticResource CardBrush}"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    Padding="18">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.08" />
+                </Border.Effect>
+
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="14" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel>
+                            <TextBlock Text="Comandos del PC" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
+                            <TextBlock Text="Selecciona uno para probarlo directamente en Windows." Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,3,0,0" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="Abrir commands.json"
+                                    Command="{Binding OpenConfigurationCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,0,8,0" />
+                            <Button Content="Recargar"
+                                    Command="{Binding ReloadCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Border Grid.Row="2"
+                            BorderBrush="{StaticResource BorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            ClipToBounds="True">
+                        <ListView ItemsSource="{Binding Commands}"
+                                  SelectedItem="{Binding SelectedCommand}"
+                                  Background="White"
+                                  Foreground="{StaticResource TextBrush}"
+                                  BorderThickness="0"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="Nombre" Width="230" DisplayMemberBinding="{Binding Name}" />
+                                    <GridViewColumn Header="Tipo" Width="120" DisplayMemberBinding="{Binding Type}" />
+                                    <GridViewColumn Header="Descripción" Width="470" DisplayMemberBinding="{Binding Description}" />
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </Border>
+                </Grid>
+            </Border>
+
+            <!-- Footer -->
+            <Grid Grid.Row="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Status}" FontWeight="SemiBold" Foreground="{StaticResource AmazonSlateBrush}" />
+                    <TextBlock Text="{Binding ConfigurationPath}"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               FontSize="11"
+                               TextTrimming="CharacterEllipsis"
+                               MaxWidth="650" />
+                </StackPanel>
+
+                <Button Grid.Column="1"
+                        Content="Ejecutar comando"
+                        Command="{Binding ExecuteSelectedCommand}"
+                        Style="{StaticResource AlexaButtonStyle}"
+                        Padding="22,11"
+                        Margin="18,0,0,0" />
+            </Grid>
         </Grid>
     </Grid>
 </Window>
