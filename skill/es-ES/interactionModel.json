@@ -1,0 +1,43 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "control pc",
+      "intents": [
+        {
+          "name": "ExecuteCommandIntent",
+          "slots": [
+            {
+              "name": "command",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "abre {command}",
+            "ejecuta {command}",
+            "inicia {command}",
+            "pon {command}",
+            "haz {command}",
+            "lanza {command}"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    }
+  }
+}

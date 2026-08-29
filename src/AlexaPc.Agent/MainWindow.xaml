@@ -14,7 +14,6 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Brand header -->
         <Border Grid.Row="0" Background="{StaticResource AmazonNavyBrush}" Padding="28,22">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -40,10 +39,32 @@
                             <TextBlock Text="PC LOCAL · LISTO" Foreground="White" FontSize="12" FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
-                    <Border Background="#4A3520" CornerRadius="8" Padding="12,8">
+
+                    <Border CornerRadius="8" Padding="12,8">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="#4A3520" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsRelayConnected}" Value="True">
+                                        <Setter Property="Background" Value="#163D31" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
                         <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="8" Height="8" Fill="{StaticResource AmazonOrangeBrush}" Margin="0,0,7,0" />
-                            <TextBlock Text="ALEXA · SIN CONECTAR" Foreground="White" FontSize="12" FontWeight="SemiBold" />
+                            <Ellipse Width="8" Height="8" Margin="0,0,7,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{StaticResource AmazonOrangeBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsRelayConnected}" Value="True">
+                                                <Setter Property="Fill" Value="{StaticResource SuccessBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding RelayStatus}" Foreground="White" FontSize="12" FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -59,7 +80,6 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Alexa integration notice -->
             <Border Grid.Row="0"
                     Background="{StaticResource WarningBackgroundBrush}"
                     BorderBrush="#FFD28B"
@@ -72,16 +92,15 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
                     <Border Width="30" Height="30" Background="{StaticResource AmazonOrangeBrush}" CornerRadius="15" Margin="0,0,12,0">
-                        <TextBlock Text="!" Foreground="{StaticResource AmazonNavyBrush}" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        <TextBlock Text="2" Foreground="{StaticResource AmazonNavyBrush}" FontSize="15" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock Text="Alexa todavía no está conectada a esta aplicación." FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
-                        <TextBlock Text="Los comandos de esta pantalla funcionan localmente. La conexión de voz será el siguiente módulo." Foreground="#705027" FontSize="12" Margin="0,2,0,0" />
+                        <TextBlock Text="Conexión remota" FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
+                        <TextBlock Text="AlexaPc intenta conectar al relay configurado en relay.json. Cuando marque CONECTADO, el PC ya puede recibir órdenes remotas." Foreground="#705027" FontSize="12" Margin="0,2,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- Commands card -->
             <Border Grid.Row="2"
                     Background="{StaticResource CardBrush}"
                     BorderBrush="{StaticResource BorderBrush}"
@@ -107,12 +126,16 @@
 
                         <StackPanel>
                             <TextBlock Text="Comandos del PC" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
-                            <TextBlock Text="Selecciona uno para probarlo directamente en Windows." Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,3,0,0" />
+                            <TextBlock Text="Solo se ejecutan comandos definidos aquí: Alexa nunca enviará código arbitrario al equipo." Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,3,0,0" />
                         </StackPanel>
 
                         <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="Abrir commands.json"
+                            <Button Content="commands.json"
                                     Command="{Binding OpenConfigurationCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Margin="0,0,8,0" />
+                            <Button Content="relay.json"
+                                    Command="{Binding OpenRelayConfigurationCommand}"
                                     Style="{StaticResource SecondaryButtonStyle}"
                                     Margin="0,0,8,0" />
                             <Button Content="Recargar"
@@ -144,7 +167,6 @@
                 </Grid>
             </Border>
 
-            <!-- Footer -->
             <Grid Grid.Row="4">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
