@@ -4,41 +4,24 @@
       "invocationName": "bardo control",
       "intents": [
         {
+          "name": "AMAZON.PauseIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.ResumeIntent",
+          "samples": []
+        },
+        {
           "name": "MediaPlayIntent",
           "samples": [
             "reproduce",
-            "reproduzca",
             "reproducir",
-            "reanuda",
-            "reanude",
-            "reanudar",
-            "continúa",
-            "continua",
-            "continue",
-            "continuar",
             "empieza a reproducir",
             "empiece a reproducir",
-            "empieza la reproducción",
-            "empiece la reproducción",
             "inicia la reproducción",
             "inicie la reproducción",
-            "reanuda la reproducción",
-            "reanude la reproducción",
-            "continúa la reproducción",
-            "continua la reproducción"
-          ],
-          "slots": []
-        },
-        {
-          "name": "MediaPauseIntent",
-          "samples": [
-            "pausa",
-            "pausar",
-            "pause",
-            "pon pausa",
-            "ponga pausa",
-            "pausa la reproducción",
-            "pause la reproducción"
+            "pon la reproducción",
+            "ponga la reproducción"
           ],
           "slots": []
         },
