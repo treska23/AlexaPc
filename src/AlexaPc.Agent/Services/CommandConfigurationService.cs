@@ -38,7 +38,13 @@ public sealed class CommandConfigurationService
         var document = JsonSerializer.Deserialize<CommandConfigurationDocument>(json, _jsonOptions)
                        ?? new CommandConfigurationDocument();
 
-        return document.Commands;
+        var commands = document.Commands.ToList();
+        if (MigrateAndAddMissingDefaults(commands))
+        {
+            Save(commands);
+        }
+
+        return commands;
     }
 
     private void Save(IReadOnlyList<CommandDefinition> commands)
@@ -49,6 +55,42 @@ public sealed class CommandConfigurationService
         };
 
         File.WriteAllText(ConfigurationPath, JsonSerializer.Serialize(document, _jsonOptions));
+    }
+
+    private static bool MigrateAndAddMissingDefaults(List<CommandDefinition> commands)
+    {
+        var changed = false;
+
+        var pauseIndex = commands.FindIndex(command =>
+            string.Equals(command.Name, "pausa", StringComparison.OrdinalIgnoreCase));
+
+        if (pauseIndex >= 0 &&
+            commands[pauseIndex].Type == CommandType.BuiltIn &&
+            string.Equals(commands[pauseIndex].Target, "media.playPause", StringComparison.OrdinalIgnoreCase))
+        {
+            commands[pauseIndex] = new CommandDefinition
+            {
+                Name = "pausa",
+                Description = "Pausa el contenido multimedia actual.",
+                Type = CommandType.BuiltIn,
+                Target = "media.pause"
+            };
+            changed = true;
+        }
+
+        foreach (var defaultCommand in CreateDefaults())
+        {
+            if (commands.Any(command =>
+                    string.Equals(command.Name, defaultCommand.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            commands.Add(defaultCommand);
+            changed = true;
+        }
+
+        return changed;
     }
 
     private static IReadOnlyList<CommandDefinition> CreateDefaults() =>
@@ -70,9 +112,23 @@ public sealed class CommandConfigurationService
         new()
         {
             Name = "pausa",
-            Description = "Reproduce o pausa el contenido multimedia actual.",
+            Description = "Pausa el contenido multimedia actual.",
             Type = CommandType.BuiltIn,
-            Target = "media.playPause"
+            Target = "media.pause"
+        },
+        new()
+        {
+            Name = "reanuda",
+            Description = "Reanuda el contenido multimedia pausado.",
+            Type = CommandType.BuiltIn,
+            Target = "media.play"
+        },
+        new()
+        {
+            Name = "reproduce",
+            Description = "Inicia o reanuda la reproducción multimedia actual.",
+            Type = CommandType.BuiltIn,
+            Target = "media.play"
         },
         new()
         {
