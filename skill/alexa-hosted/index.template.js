@@ -15,6 +15,16 @@ exports.handler = async (event) => {
   if (request.type === 'IntentRequest') {
     const intentName = request.intent?.name;
 
+    if (intentName === 'MediaPlayIntent') {
+      const result = await executeRemoteCommand('reproduce');
+      return speak(result.success ? 'Hecho.' : result.message);
+    }
+
+    if (intentName === 'MediaPauseIntent') {
+      const result = await executeRemoteCommand('pausa');
+      return speak(result.success ? 'Hecho.' : result.message);
+    }
+
     if (intentName === 'ExecuteCommandIntent') {
       const rawCommand = getCommandSlotValue(request);
       if (!rawCommand) {
@@ -28,7 +38,7 @@ exports.handler = async (event) => {
 
     if (intentName === 'AMAZON.HelpIntent') {
       return ask(
-        'Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube.',
+        'Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube, pausa o reproduce.',
         '¿Qué quieres que haga?'
       );
     }
@@ -84,7 +94,26 @@ function normalizeCommand(value) {
     'apaga el ordenador': 'apaga ordenador',
     'apaga el pc': 'apaga ordenador',
     'reinicia el ordenador': 'reinicia ordenador',
-    'reinicia el pc': 'reinicia ordenador'
+    'reinicia el pc': 'reinicia ordenador',
+    'reanuda la reproducción': 'reanuda',
+    'reanuda la reproduccion': 'reanuda',
+    'reanudar la reproducción': 'reanuda',
+    'reanudar la reproduccion': 'reanuda',
+    'continúa': 'reanuda',
+    'continua': 'reanuda',
+    'continúe': 'reanuda',
+    'continue': 'reanuda',
+    'continúa la reproducción': 'reanuda',
+    'continua la reproduccion': 'reanuda',
+    'reproducir': 'reproduce',
+    'empieza a reproducir': 'reproduce',
+    'empiece a reproducir': 'reproduce',
+    'inicia la reproducción': 'reproduce',
+    'inicia la reproduccion': 'reproduce',
+    'pausa la reproducción': 'pausa',
+    'pausa la reproduccion': 'pausa',
+    'pausar': 'pausa',
+    'pon pausa': 'pausa'
   };
 
   return aliases[normalized] ?? normalized;
