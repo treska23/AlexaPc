@@ -24,7 +24,7 @@ También se incluye el modelo `es-ES` de la Custom Skill y una Lambda Node.js qu
 - Cliente WebSocket persistente con reconexión automática.
 - `AlexaPc.Relay` con autenticación de dispositivo y API key.
 - Respuesta de resultado del PC al relay.
-- Modelo de Skill en español (`control pc`).
+- Modelo de Skill en español (`bardo`).
 - Lambda puente entre Alexa y el relay.
 - Build automática con GitHub Actions.
 
@@ -74,13 +74,13 @@ La configuración completa está en [`docs/alexa-setup.md`](docs/alexa-setup.md)
 La invocación de la Skill es:
 
 ```text
-control pc
+bardo
 ```
 
 Cuando la Skill esté desplegada y habilitada:
 
 ```text
-Alexa, abre control PC.
+Alexa, abre Bardo.
 ```
 
 Y después:
@@ -89,12 +89,15 @@ Y después:
 abre YouTube
 ```
 
+También puede usarse en una sola frase:
+
+```text
+Alexa, dile a Bardo que abra YouTube.
+```
+
 El agente solo ejecuta nombres existentes en `commands.json`; Alexa no puede mandar código arbitrario al equipo.
 
 ## Siguiente fase
 
-- Publicar `AlexaPc.Relay` detrás de HTTPS/WSS.
-- Crear y enlazar la Custom Skill en Amazon Developer.
-- Probar la invocación en una sola frase.
 - Añadir bandeja del sistema y arranque automático con Windows.
 - Añadir Wake-on-LAN para encender el PC cuando esté apagado.
