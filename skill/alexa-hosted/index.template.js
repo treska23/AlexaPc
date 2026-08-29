@@ -6,16 +6,17 @@ const DEVICE_ID = __DEVICE_ID_JSON__;
 
 exports.handler = async (event) => {
   const request = event?.request ?? {};
+  logRequest(request);
 
   if (request.type === 'LaunchRequest') {
-    return ask('Bardo listo. ¿Qué quieres que haga?', 'Puedes decir, por ejemplo, abre YouTube.');
+    return ask('Bardo Control listo. ¿Qué quieres que haga?', 'Puedes decir, por ejemplo, abre YouTube.');
   }
 
   if (request.type === 'IntentRequest') {
     const intentName = request.intent?.name;
 
     if (intentName === 'ExecuteCommandIntent') {
-      const rawCommand = request.intent?.slots?.command?.value?.trim();
+      const rawCommand = getCommandSlotValue(request);
       if (!rawCommand) {
         return ask('No he entendido el comando. ¿Qué quieres que haga?', 'Di, por ejemplo, abre YouTube.');
       }
@@ -37,7 +38,7 @@ exports.handler = async (event) => {
     }
 
     if (intentName === 'AMAZON.FallbackIntent') {
-      return ask('No he reconocido esa orden de Bardo.', 'Prueba con abre YouTube.');
+      return ask('No he reconocido esa orden de Bardo Control.', 'Prueba con abre YouTube.');
     }
   }
 
@@ -47,6 +48,25 @@ exports.handler = async (event) => {
 
   return ask('¿Qué quieres que haga en el PC?', 'Puedes decir abre YouTube.');
 };
+
+function getCommandSlotValue(request) {
+  return request.intent?.slots?.command?.value?.trim() || null;
+}
+
+function logRequest(request) {
+  const isIntentRequest = request.type === 'IntentRequest';
+  const entry = {
+    component: 'AlexaPc.Skill',
+    event: 'request',
+    requestType: request.type ?? 'UnknownRequest',
+    requestId: request.requestId ?? null,
+    locale: request.locale ?? null,
+    intentName: isIntentRequest ? request.intent?.name ?? null : null,
+    command: isIntentRequest ? getCommandSlotValue(request) : null
+  };
+
+  console.info(JSON.stringify(entry));
+}
 
 function normalizeCommand(value) {
   const normalized = value.toLocaleLowerCase('es-ES').trim().replace(/\s+/g, ' ');
@@ -149,3 +169,5 @@ function ask(text, reprompt) {
     }
   };
 }
+
+exports._test = { normalizeCommand };

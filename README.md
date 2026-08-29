@@ -24,7 +24,7 @@ También se incluye el modelo `es-ES` de la Custom Skill y una Lambda Node.js qu
 - Cliente WebSocket persistente con reconexión automática.
 - `AlexaPc.Relay` con autenticación de dispositivo y API key.
 - Respuesta de resultado del PC al relay.
-- Modelo de Skill en español (`bardo`).
+- Modelo de Skill en español (`bardo control`).
 - Lambda puente entre Alexa y el relay.
 - Build automática con GitHub Actions.
 
@@ -74,13 +74,13 @@ La configuración completa está en [`docs/alexa-setup.md`](docs/alexa-setup.md)
 La invocación de la Skill es:
 
 ```text
-bardo
+bardo control
 ```
 
 Cuando la Skill esté desplegada y habilitada:
 
 ```text
-Alexa, abre Bardo.
+Alexa, abre Bardo Control.
 ```
 
 Y después:
@@ -92,8 +92,19 @@ abre YouTube
 También puede usarse en una sola frase:
 
 ```text
-Alexa, dile a Bardo que abra YouTube.
+Alexa, dile a Bardo Control que abra YouTube.
 ```
+
+Otra forma oficialmente soportada es:
+
+```text
+Alexa, abre Bardo Control y abre YouTube.
+```
+
+La elección del nombre de dos palabras es deliberada: Amazon no admite nombres de
+invocación de una sola palabra salvo marcas acreditadas. El diagnóstico y las
+frases válidas están documentados en
+[`docs/alexa-one-shot.md`](docs/alexa-one-shot.md).
 
 El agente solo ejecuta nombres existentes en `commands.json`; Alexa no puede mandar código arbitrario al equipo.
 

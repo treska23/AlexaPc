@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "bardo",
+      "invocationName": "bardo control",
       "intents": [
         {
           "name": "ExecuteCommandIntent",
@@ -15,11 +15,9 @@
             "abre {command}",
             "abra {command}",
             "abrir {command}",
-            "que abra {command}",
             "ejecuta {command}",
             "ejecute {command}",
             "ejecutar {command}",
-            "que ejecute {command}",
             "inicia {command}",
             "inicie {command}",
             "iniciar {command}",

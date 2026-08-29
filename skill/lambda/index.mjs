@@ -4,20 +4,22 @@ const deviceId = process.env.DEVICE_ID ?? "pc-principal";
 
 export const handler = async (event) => {
   const request = event?.request ?? {};
+  logRequest(request);
 
   if (request.type === "LaunchRequest") {
-    return ask("Bardo listo. ¿Qué quieres que haga?", "Puedes decir, por ejemplo, abre YouTube.");
+    return ask("Bardo Control listo. ¿Qué quieres que haga?", "Puedes decir, por ejemplo, abre YouTube.");
   }
 
   if (request.type === "IntentRequest") {
     const intentName = request.intent?.name;
 
     if (intentName === "ExecuteCommandIntent") {
-      const command = request.intent?.slots?.command?.value?.trim();
-      if (!command) {
+      const rawCommand = getCommandSlotValue(request);
+      if (!rawCommand) {
         return ask("No he entendido el comando. ¿Qué quieres que haga?", "Di, por ejemplo, abre YouTube.");
       }
 
+      const command = normalizeCommand(rawCommand);
       const result = await executeRemoteCommand(command);
       return speak(result.success ? "Hecho." : result.message);
     }
@@ -34,7 +36,7 @@ export const handler = async (event) => {
     }
 
     if (intentName === "AMAZON.FallbackIntent") {
-      return ask("No he reconocido esa orden de Bardo.", "Prueba con abre YouTube.");
+      return ask("No he reconocido esa orden de Bardo Control.", "Prueba con abre YouTube.");
     }
   }
 
@@ -44,6 +46,47 @@ export const handler = async (event) => {
 
   return ask("¿Qué quieres que haga en el PC?", "Puedes decir abre YouTube.");
 };
+
+function getCommandSlotValue(request) {
+  return request.intent?.slots?.command?.value?.trim() || null;
+}
+
+function logRequest(request) {
+  const isIntentRequest = request.type === "IntentRequest";
+  const entry = {
+    component: "AlexaPc.Skill",
+    event: "request",
+    requestType: request.type ?? "UnknownRequest",
+    requestId: request.requestId ?? null,
+    locale: request.locale ?? null,
+    intentName: isIntentRequest ? request.intent?.name ?? null : null,
+    command: isIntentRequest ? getCommandSlotValue(request) : null
+  };
+
+  console.info(JSON.stringify(entry));
+}
+
+export function normalizeCommand(value) {
+  const normalized = value.toLocaleLowerCase("es-ES").trim().replace(/\s+/g, " ");
+  const aliases = {
+    "you tube": "youtube",
+    "el youtube": "youtube",
+    "bloc notas": "bloc de notas",
+    "el bloc de notas": "bloc de notas",
+    "sube el volumen": "sube volumen",
+    "baja el volumen": "baja volumen",
+    "bloquea el ordenador": "bloquea ordenador",
+    "bloquea el pc": "bloquea ordenador",
+    "suspende el ordenador": "suspende ordenador",
+    "suspende el pc": "suspende ordenador",
+    "apaga el ordenador": "apaga ordenador",
+    "apaga el pc": "apaga ordenador",
+    "reinicia el ordenador": "reinicia ordenador",
+    "reinicia el pc": "reinicia ordenador"
+  };
+
+  return aliases[normalized] ?? normalized;
+}
 
 async function executeRemoteCommand(command) {
   if (!relayUrl || !apiKey) {
