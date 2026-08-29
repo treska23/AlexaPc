@@ -4,7 +4,7 @@
     "Projects": [
       {
         "Path": "src\\AlexaPc.Relay\\AlexaPc.Relay.csproj",
-        "Action": "Start"
+        "Action": "StartWithoutDebugging"
       },
       {
         "Path": "src\\AlexaPc.Agent\\AlexaPc.Agent.csproj",
