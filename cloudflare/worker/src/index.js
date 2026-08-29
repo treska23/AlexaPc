@@ -5,7 +5,13 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === "/health" && request.method === "GET") {
-      return json({ status: "ok", service: "AlexaPc Cloud Relay" });
+      const deviceId = url.searchParams.get("deviceId")?.trim();
+      if (!deviceId) {
+        return json({ status: "ok", service: "AlexaPc Cloud Relay" });
+      }
+
+      const stub = env.RELAY.getByName(deviceId);
+      return stub.fetch("https://relay.internal/health");
     }
 
     if (url.pathname === "/ws/agent") {
@@ -21,7 +27,10 @@ export default {
       }
 
       const stub = env.RELAY.getByName(deviceId);
-      return stub.fetch(new Request("https://relay.internal/ws", request));
+      return stub.fetch(new Request("https://relay.internal/ws", {
+        method: "GET",
+        headers: request.headers
+      }));
     }
 
     if (url.pathname === "/api/commands" && request.method === "POST") {
@@ -64,14 +73,22 @@ export class AlexaPcRelay extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
 
+    if (url.pathname === "/health") {
+      const connectedAgents = this.ctx
+        .getWebSockets("agent")
+        .filter(ws => ws.readyState === WebSocket.OPEN)
+        .length;
+
+      return json({ status: "ok", connectedAgents });
+    }
+
     if (url.pathname === "/ws") {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return json({ message: "WebSocket requerido." }, 400);
       }
 
       const pair = new WebSocketPair();
-      const client = pair[0];
-      const server = pair[1];
+      const [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server, ["agent"]);
 
       return new Response(null, { status: 101, webSocket: client });
