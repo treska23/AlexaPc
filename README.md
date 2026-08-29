@@ -4,127 +4,97 @@ Agente de Windows para controlar el PC mediante comandos de voz de Alexa.
 
 ## Estado actual
 
-La primera versión ya contiene el núcleo local. Antes de conectar Alexa podemos probar cada acción directamente en Windows, lo que permite separar problemas del PC de problemas de la Skill o del transporte remoto.
+AlexaPc ya tiene dos capas funcionales:
 
-### Ya implementado
+- `AlexaPc.Agent`: aplicación WPF que ejecuta los comandos en Windows.
+- `AlexaPc.Relay`: relay HTTP/WebSocket que recibe una orden remota y la envía al PC conectado.
 
-- WPF sobre .NET 10.
-- MVVM sin lógica de aplicación en el code-behind de la ventana.
-- Configuración de comandos mediante JSON.
-- Apertura de programas y archivos ejecutables.
-- Apertura de URLs.
-- Play/Pause, pista siguiente/anterior.
-- Subir/bajar volumen y mute.
-- Bloquear Windows.
-- Suspender, apagar y reiniciar.
-- Interfaz local para ejecutar y validar comandos.
+También se incluye el modelo `es-ES` de la Custom Skill y una Lambda Node.js que convierte la orden de voz en una llamada al relay.
+
+### Implementado
+
+- WPF sobre .NET 10 y MVVM.
+- Configuración de comandos mediante `commands.json`.
+- Apertura de programas y URLs.
+- Play/Pause, pista siguiente/anterior, volumen y mute.
+- Bloquear, suspender, apagar y reiniciar Windows.
+- Icono propio integrado en el ejecutable y la barra de tareas.
+- Creación automática del acceso directo `AlexaPc.lnk` en el escritorio.
+- `relay.json` para configurar el transporte remoto.
+- Cliente WebSocket persistente con reconexión automática.
+- `AlexaPc.Relay` con autenticación de dispositivo y API key.
+- Respuesta de resultado del PC al relay.
+- Modelo de Skill en español (`control pc`).
+- Lambda puente entre Alexa y el relay.
 - Build automática con GitHub Actions.
 
-## Ejecutar
+## Ejecutar el agente
 
 1. Clona el repositorio.
 2. Abre `AlexaPc.sln` en Visual Studio 2026.
 3. Establece `AlexaPc.Agent` como proyecto de inicio.
 4. Ejecuta con `F5`.
 
-La primera vez se crea automáticamente:
+La primera vez se crean automáticamente:
 
 ```text
 %LOCALAPPDATA%\AlexaPc\commands.json
+%LOCALAPPDATA%\AlexaPc\relay.json
 ```
 
-La aplicación incluye un botón para abrir ese archivo. Después de modificarlo, pulsa **Recargar**.
+## Probar el canal remoto localmente
 
-## Comandos personalizados
-
-Ejemplo para abrir un programa:
-
-```json
-{
-  "name": "bloc de notas",
-  "description": "Abre el Bloc de notas.",
-  "type": "process",
-  "target": "notepad.exe"
-}
-```
-
-Con argumentos:
-
-```json
-{
-  "name": "mi carpeta",
-  "description": "Abre una carpeta concreta.",
-  "type": "process",
-  "target": "explorer.exe",
-  "arguments": "C:\\Users\\TuUsuario\\Documents"
-}
-```
-
-Una URL:
-
-```json
-{
-  "name": "youtube",
-  "description": "Abre YouTube.",
-  "type": "url",
-  "target": "https://www.youtube.com"
-}
-```
-
-Las variables de entorno de Windows funcionan en `target` y `arguments`, por ejemplo `%USERPROFILE%`.
-
-## Acciones integradas
-
-Los comandos de tipo `builtIn` aceptan actualmente estos valores:
+Arranca `AlexaPc.Relay` y luego `AlexaPc.Agent`. El badge superior debe pasar a:
 
 ```text
-media.playPause
-media.next
-media.previous
-volume.mute
-volume.up
-volume.down
-system.lock
-system.sleep
-system.shutdown
-system.restart
+RELAY · CONECTADO
 ```
 
-## Arquitectura prevista
+Después ejecuta en PowerShell:
+
+```powershell
+Invoke-RestMethod `
+  -Method Post `
+  -Uri "http://localhost:5184/api/commands" `
+  -Headers @{ "X-AlexaPc-Api-Key" = "dev-api-key" } `
+  -ContentType "application/json" `
+  -Body '{"deviceId":"pc-principal","command":"youtube"}'
+```
+
+Si se abre YouTube, funciona el recorrido:
 
 ```text
-"Alexa, abre DaVinci"
-        │
-        ▼
-      Alexa
-        │
-        ▼
-   Alexa Skill
-        │
-        ▼
-  AlexaPc.Relay
-        │ WebSocket/TLS
-        ▼
-  AlexaPc.Agent
-        │
-        ▼
- CommandDispatcher
-        │
-        ▼
-      Windows
+HTTP -> Relay -> WebSocket -> Agent -> CommandDispatcher -> Windows
 ```
 
-El PC iniciará una conexión saliente persistente. No será necesario abrir puertos del router ni exponer directamente Windows a Internet.
+## Alexa
 
-Alexa enviará **nombres de comandos**, no scripts arbitrarios. El agente solamente ejecutará acciones que existan en su configuración local.
+La configuración completa está en [`docs/alexa-setup.md`](docs/alexa-setup.md).
 
-Más detalle en [`docs/architecture.md`](docs/architecture.md).
+La invocación de la Skill es:
+
+```text
+control pc
+```
+
+Cuando la Skill esté desplegada y habilitada:
+
+```text
+Alexa, abre control PC.
+```
+
+Y después:
+
+```text
+abre YouTube
+```
+
+El agente solo ejecuta nombres existentes en `commands.json`; Alexa no puede mandar código arbitrario al equipo.
 
 ## Siguiente fase
 
-- Bandeja del sistema y arranque automático con Windows.
-- Edición visual de comandos desde la propia aplicación.
-- `AlexaPc.Relay` con WebSocket autenticado.
-- Conexión persistente del agente al relay.
-- Alexa Skill.
-- Wake-on-LAN para encender el PC cuando esté apagado.
+- Publicar `AlexaPc.Relay` detrás de HTTPS/WSS.
+- Crear y enlazar la Custom Skill en Amazon Developer.
+- Probar la invocación en una sola frase.
+- Añadir bandeja del sistema y arranque automático con Windows.
+- Añadir Wake-on-LAN para encender el PC cuando esté apagado.
