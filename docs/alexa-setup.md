@@ -88,7 +88,7 @@ skill/es-ES/interactionModel.json
 La invocación actual es:
 
 ```text
-control pc
+bardo
 ```
 
 El código de Lambda está en:
@@ -112,7 +112,7 @@ El modelo usa `AMAZON.SearchQuery` para capturar nombres de comandos abiertos co
 Una vez la Skill esté enlazada y habilitada:
 
 ```text
-Alexa, abre control PC.
+Alexa, abre Bardo.
 ```
 
 Alexa responderá preguntando qué quieres hacer. Entonces:
@@ -124,7 +124,7 @@ abre YouTube
 También puede usarse una sola frase:
 
 ```text
-Alexa, dile a control PC que abra YouTube.
+Alexa, dile a Bardo que abra YouTube.
 ```
 
 Los nombres recibidos deben corresponder a comandos de `commands.json`. AlexaPc nunca acepta código arbitrario desde Internet.
