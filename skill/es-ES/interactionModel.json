@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "control pc",
+      "invocationName": "bardo",
       "intents": [
         {
           "name": "ExecuteCommandIntent",
