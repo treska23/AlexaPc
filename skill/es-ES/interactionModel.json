@@ -7,6 +7,7 @@
           "name": "MediaPlayIntent",
           "samples": [
             "reproduce",
+            "reproduzca",
             "reproducir",
             "reanuda",
             "reanude",
@@ -17,6 +18,8 @@
             "continuar",
             "empieza a reproducir",
             "empiece a reproducir",
+            "empieza la reproducción",
+            "empiece la reproducción",
             "inicia la reproducción",
             "inicie la reproducción",
             "reanuda la reproducción",
