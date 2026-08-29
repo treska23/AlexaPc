@@ -7,7 +7,7 @@ public sealed class CommandExecutionService
 {
     private readonly BuiltInActionService _builtInActionService = new();
 
-    public Task<CommandResult> ExecuteAsync(CommandDefinition command, CancellationToken cancellationToken = default)
+    public async Task<CommandResult> ExecuteAsync(CommandDefinition command, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -15,15 +15,15 @@ public sealed class CommandExecutionService
         {
             return command.Type switch
             {
-                CommandType.Process => Task.FromResult(ExecuteProcess(command)),
-                CommandType.Url => Task.FromResult(OpenUrl(command)),
-                CommandType.BuiltIn => Task.FromResult(_builtInActionService.Execute(command.Target)),
-                _ => Task.FromResult(CommandResult.Fail($"Tipo de comando no soportado: {command.Type}."))
+                CommandType.Process => ExecuteProcess(command),
+                CommandType.Url => OpenUrl(command),
+                CommandType.BuiltIn => await _builtInActionService.ExecuteAsync(command.Target, cancellationToken),
+                _ => CommandResult.Fail($"Tipo de comando no soportado: {command.Type}.")
             };
         }
         catch (Exception ex)
         {
-            return Task.FromResult(CommandResult.Fail(ex.Message));
+            return CommandResult.Fail(ex.Message);
         }
     }
 
