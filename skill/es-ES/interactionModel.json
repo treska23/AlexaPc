@@ -13,11 +13,17 @@
           ],
           "samples": [
             "abre {command}",
+            "abra {command}",
             "ejecuta {command}",
+            "ejecute {command}",
             "inicia {command}",
+            "inicie {command}",
             "pon {command}",
+            "ponga {command}",
             "haz {command}",
-            "lanza {command}"
+            "haga {command}",
+            "lanza {command}",
+            "lance {command}"
           ]
         },
         {
