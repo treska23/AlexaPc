@@ -15,6 +15,10 @@ public sealed class BuiltInActionService
     private const byte VkMediaPrevTrack = 0xB1;
     private const byte VkMediaPlayPause = 0xB3;
 
+    private const uint WmAppCommand = 0x0319;
+    private const int AppCommandMediaPlay = 46;
+    private const int AppCommandMediaPause = 47;
+
     public async Task<CommandResult> ExecuteAsync(string action, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -74,30 +78,61 @@ public sealed class BuiltInActionService
             var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
             var session = manager.GetCurrentSession();
 
-            if (session is null)
+            if (session is not null)
             {
-                return CommandResult.Fail("Windows no tiene ninguna sesión multimedia activa.");
+                var status = session.GetPlaybackInfo().PlaybackStatus;
+
+                if (play && status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                {
+                    return CommandResult.Ok("La reproducción ya estaba activa.");
+                }
+
+                if (!play && status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Paused)
+                {
+                    return CommandResult.Ok("La reproducción ya estaba pausada.");
+                }
+
+                var success = play
+                    ? await session.TryPlayAsync()
+                    : await session.TryPauseAsync();
+
+                if (success)
+                {
+                    return CommandResult.Ok(play
+                        ? "Reproducción iniciada o reanudada."
+                        : "Reproducción pausada.");
+                }
             }
-
-            var success = play
-                ? await session.TryPlayAsync()
-                : await session.TryPauseAsync();
-
-            if (!success)
-            {
-                return CommandResult.Fail(play
-                    ? "Windows no pudo iniciar o reanudar la reproducción."
-                    : "Windows no pudo pausar la reproducción.");
-            }
-
-            return CommandResult.Ok(play
-                ? "Reproducción iniciada o reanudada."
-                : "Reproducción pausada.");
         }
-        catch (Exception ex)
+        catch
         {
-            return CommandResult.Fail($"No se pudo controlar la sesión multimedia: {ex.Message}");
+            // Some browsers/players do not expose a controllable GSMTC session.
+            // Fall through to the native WM_APPCOMMAND path below.
         }
+
+        if (SendDirectMediaCommand(play))
+        {
+            return CommandResult.Ok(play
+                ? "Orden directa de reproducción enviada."
+                : "Orden directa de pausa enviada.");
+        }
+
+        return CommandResult.Fail(play
+            ? "Windows no pudo iniciar o reanudar la reproducción."
+            : "Windows no pudo pausar la reproducción.");
+    }
+
+    private static bool SendDirectMediaCommand(bool play)
+    {
+        var targetWindow = GetForegroundWindow();
+        if (targetWindow == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var command = play ? AppCommandMediaPlay : AppCommandMediaPause;
+        var lParam = new IntPtr(command << 16);
+        return PostMessage(targetWindow, WmAppCommand, targetWindow, lParam);
     }
 
     private static void StartSystemProcess(string fileName, string arguments)
@@ -119,6 +154,13 @@ public sealed class BuiltInActionService
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("powrprof.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
