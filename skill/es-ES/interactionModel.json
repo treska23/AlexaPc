@@ -4,6 +4,42 @@
       "invocationName": "bardo control",
       "intents": [
         {
+          "name": "MediaPlayIntent",
+          "samples": [
+            "reproduce",
+            "reproducir",
+            "reanuda",
+            "reanude",
+            "reanudar",
+            "continúa",
+            "continua",
+            "continue",
+            "continuar",
+            "empieza a reproducir",
+            "empiece a reproducir",
+            "inicia la reproducción",
+            "inicie la reproducción",
+            "reanuda la reproducción",
+            "reanude la reproducción",
+            "continúa la reproducción",
+            "continua la reproducción"
+          ],
+          "slots": []
+        },
+        {
+          "name": "MediaPauseIntent",
+          "samples": [
+            "pausa",
+            "pausar",
+            "pause",
+            "pon pausa",
+            "ponga pausa",
+            "pausa la reproducción",
+            "pause la reproducción"
+          ],
+          "slots": []
+        },
+        {
           "name": "ExecuteCommandIntent",
           "slots": [
             {
