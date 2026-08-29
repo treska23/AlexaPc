@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using AlexaPc.Agent.Models;
+using Windows.Media.Control;
 
 namespace AlexaPc.Agent.Services;
 
@@ -14,10 +15,16 @@ public sealed class BuiltInActionService
     private const byte VkMediaPrevTrack = 0xB1;
     private const byte VkMediaPlayPause = 0xB3;
 
-    public CommandResult Execute(string action)
+    public async Task<CommandResult> ExecuteAsync(string action, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         switch (action.Trim().ToLowerInvariant())
         {
+            case "media.play":
+                return await SetPlaybackStateAsync(play: true, cancellationToken);
+            case "media.pause":
+                return await SetPlaybackStateAsync(play: false, cancellationToken);
             case "media.playpause":
                 PressMediaKey(VkMediaPlayPause);
                 break;
@@ -56,6 +63,41 @@ public sealed class BuiltInActionService
         }
 
         return CommandResult.Ok($"Acción ejecutada: {action}");
+    }
+
+    private static async Task<CommandResult> SetPlaybackStateAsync(bool play, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            var session = manager.GetCurrentSession();
+
+            if (session is null)
+            {
+                return CommandResult.Fail("Windows no tiene ninguna sesión multimedia activa.");
+            }
+
+            var success = play
+                ? await session.TryPlayAsync()
+                : await session.TryPauseAsync();
+
+            if (!success)
+            {
+                return CommandResult.Fail(play
+                    ? "Windows no pudo iniciar o reanudar la reproducción."
+                    : "Windows no pudo pausar la reproducción.");
+            }
+
+            return CommandResult.Ok(play
+                ? "Reproducción iniciada o reanudada."
+                : "Reproducción pausada.");
+        }
+        catch (Exception ex)
+        {
+            return CommandResult.Fail($"No se pudo controlar la sesión multimedia: {ex.Message}");
+        }
     }
 
     private static void StartSystemProcess(string fileName, string arguments)
