@@ -13,39 +13,46 @@ $modelPath = Join-Path $repoRoot 'skill\es-ES\interactionModel.json'
 $outputPath = Join-Path $localDir 'alexa-hosted-index.js'
 
 function Read-Utf8Text([string]$path) {
-    return Get-Content -Path $path -Raw -Encoding UTF8
+    return [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8)
+}
+
+function Write-Utf8Text([string]$path, [string]$text) {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($path, $text, $utf8NoBom)
 }
 
 function Assert-NoMojibake([string]$text, [string]$source) {
-    if ($text -match 'Ã|Â') {
-        throw "He detectado texto mal codificado al leer $source. No voy a copiarlo a Alexa."
+    $badC3 = [string][char]0x00C3
+    $badC2 = [string][char]0x00C2
+    if ($text.Contains($badC3) -or $text.Contains($badC2)) {
+        throw "Encoding problem detected while reading $source. Nothing was copied to Alexa."
     }
 }
 
 if ($Copy -eq 'Model') {
     if (-not (Test-Path $modelPath)) {
-        throw "No encuentro el modelo de Alexa: $modelPath"
+        throw "Alexa model not found: $modelPath"
     }
 
     $model = Read-Utf8Text $modelPath
     Assert-NoMojibake $model $modelPath
     Set-Clipboard -Value $model
-    Write-Host 'Modelo de interacción copiado al portapapeles.' -ForegroundColor Green
-    Write-Host 'En Alexa Developer Console: Build > Interaction Model > JSON Editor > Ctrl+A > Ctrl+V > Save Model > Build Model.'
+    Write-Host 'Alexa interaction model copied to clipboard.' -ForegroundColor Green
+    Write-Host 'Alexa Developer Console: Build > Interaction Model > JSON Editor > Ctrl+A > Ctrl+V > Save Model > Build Model.'
     exit 0
 }
 
 if (-not (Test-Path $cloudConfigPath)) {
-    throw "No encuentro $cloudConfigPath. Ejecuta primero Deploy-CloudRelay.ps1."
+    throw "Cloud relay config not found: $cloudConfigPath. Run Deploy-CloudRelay.ps1 first."
 }
 
 if (-not (Test-Path $templatePath)) {
-    throw "No encuentro la plantilla de la Skill: $templatePath"
+    throw "Alexa skill template not found: $templatePath"
 }
 
 $config = Read-Utf8Text $cloudConfigPath | ConvertFrom-Json
 if (-not $config.relayUrl -or -not $config.apiKey -or -not $config.deviceId) {
-    throw 'cloud-relay.json no contiene relayUrl, apiKey y deviceId.'
+    throw 'cloud-relay.json must contain relayUrl, apiKey and deviceId.'
 }
 
 function To-JsJsonString([string]$value) {
@@ -59,10 +66,10 @@ $code = $code.Replace('__RELAY_API_KEY_JSON__', (To-JsJsonString ([string]$confi
 $code = $code.Replace('__DEVICE_ID_JSON__', (To-JsJsonString ([string]$config.deviceId)))
 
 New-Item -ItemType Directory -Path $localDir -Force | Out-Null
-Set-Content -Path $outputPath -Value $code -Encoding UTF8
+Write-Utf8Text $outputPath $code
 Set-Clipboard -Value $code
 
-Write-Host 'Código de la Skill copiado al portapapeles en UTF-8 correcto.' -ForegroundColor Green
-Write-Host "También lo he guardado localmente en: $outputPath"
-Write-Host 'Ese archivo contiene tu clave privada del relay: no lo subas a GitHub.' -ForegroundColor Yellow
-Write-Host 'En Alexa Developer Console: Code > lambda > index.js > Ctrl+A > Ctrl+V > Save > Deploy.'
+Write-Host 'Alexa skill code copied to clipboard with correct UTF-8 encoding.' -ForegroundColor Green
+Write-Host "Local copy: $outputPath"
+Write-Host 'This local file contains the private relay key. Do not commit it.' -ForegroundColor Yellow
+Write-Host 'Alexa Developer Console: Code > lambda > index.js > Ctrl+A > Ctrl+V > Save > Deploy.'
