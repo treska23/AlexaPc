@@ -9,19 +9,19 @@ exports.handler = async (event) => {
   logRequest(request);
 
   if (request.type === 'LaunchRequest') {
-    return ask('Bardo Control listo. ¿Qué quieres que haga?', 'Puedes decir, por ejemplo, abre YouTube.');
+    return ask('Bardo Control listo. ¿Qué quieres que haga?', 'Puedes decir, por ejemplo, abre YouTube, pausa o reanuda.');
   }
 
   if (request.type === 'IntentRequest') {
     const intentName = request.intent?.name;
 
-    if (intentName === 'MediaPlayIntent') {
-      const result = await executeRemoteCommand('reproduce');
+    if (intentName === 'AMAZON.PauseIntent' || intentName === 'MediaPauseIntent') {
+      const result = await executeRemoteCommand('pausa');
       return speak(result.success ? 'Hecho.' : result.message);
     }
 
-    if (intentName === 'MediaPauseIntent') {
-      const result = await executeRemoteCommand('pausa');
+    if (intentName === 'AMAZON.ResumeIntent' || intentName === 'MediaPlayIntent') {
+      const result = await executeRemoteCommand('reproduce');
       return speak(result.success ? 'Hecho.' : result.message);
     }
 
@@ -38,7 +38,7 @@ exports.handler = async (event) => {
 
     if (intentName === 'AMAZON.HelpIntent') {
       return ask(
-        'Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube, pausa o reproduce.',
+        'Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube, pausa, reanuda o reproduce.',
         '¿Qué quieres que haga?'
       );
     }
@@ -48,7 +48,7 @@ exports.handler = async (event) => {
     }
 
     if (intentName === 'AMAZON.FallbackIntent') {
-      return ask('No he reconocido esa orden de Bardo Control.', 'Prueba con abre YouTube.');
+      return ask('No he reconocido esa orden de Bardo Control.', 'Prueba con abre YouTube, pausa o reanuda.');
     }
   }
 
@@ -56,7 +56,7 @@ exports.handler = async (event) => {
     return { version: '1.0', response: {} };
   }
 
-  return ask('¿Qué quieres que haga en el PC?', 'Puedes decir abre YouTube.');
+  return ask('¿Qué quieres que haga en el PC?', 'Puedes decir abre YouTube, pausa o reanuda.');
 };
 
 function getCommandSlotValue(request) {
@@ -95,16 +95,18 @@ function normalizeCommand(value) {
     'apaga el pc': 'apaga ordenador',
     'reinicia el ordenador': 'reinicia ordenador',
     'reinicia el pc': 'reinicia ordenador',
-    'reanuda la reproducción': 'reanuda',
-    'reanuda la reproduccion': 'reanuda',
-    'reanudar la reproducción': 'reanuda',
-    'reanudar la reproduccion': 'reanuda',
-    'continúa': 'reanuda',
-    'continua': 'reanuda',
-    'continúe': 'reanuda',
-    'continue': 'reanuda',
-    'continúa la reproducción': 'reanuda',
-    'continua la reproduccion': 'reanuda',
+    'reanuda': 'reproduce',
+    'reanude': 'reproduce',
+    'reanuda la reproducción': 'reproduce',
+    'reanuda la reproduccion': 'reproduce',
+    'reanudar la reproducción': 'reproduce',
+    'reanudar la reproduccion': 'reproduce',
+    'continúa': 'reproduce',
+    'continua': 'reproduce',
+    'continúe': 'reproduce',
+    'continue': 'reproduce',
+    'continúa la reproducción': 'reproduce',
+    'continua la reproduccion': 'reproduce',
     'reproducir': 'reproduce',
     'empieza a reproducir': 'reproduce',
     'empiece a reproducir': 'reproduce',
