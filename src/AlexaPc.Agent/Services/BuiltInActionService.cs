@@ -40,7 +40,7 @@ public sealed class BuiltInActionService
                 StartSystemProcess("rundll32.exe", "user32.dll,LockWorkStation");
                 break;
             case "system.sleep":
-                if (!SetSuspendState(false, true, false))
+                if (!SetSuspendState(false, false, false))
                 {
                     return CommandResult.Fail("Windows no pudo suspender el equipo.");
                 }
