@@ -14,16 +14,24 @@
           "samples": [
             "abre {command}",
             "abra {command}",
+            "abrir {command}",
+            "que abra {command}",
             "ejecuta {command}",
             "ejecute {command}",
+            "ejecutar {command}",
+            "que ejecute {command}",
             "inicia {command}",
             "inicie {command}",
+            "iniciar {command}",
             "pon {command}",
             "ponga {command}",
+            "poner {command}",
             "haz {command}",
             "haga {command}",
+            "hacer {command}",
             "lanza {command}",
-            "lance {command}"
+            "lance {command}",
+            "lanzar {command}"
           ]
         },
         {
