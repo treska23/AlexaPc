@@ -6,10 +6,13 @@ using AlexaPc.Relay.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
-{
-    builder.WebHost.UseUrls("http://0.0.0.0:5184");
-}
+// Keep the local development endpoint deterministic. Visual Studio can inject
+// ASPNETCORE_URLS with a random port for web projects, which would leave the
+// desktop agent trying localhost:5184 while the relay listens elsewhere.
+var relayUrls = builder.Configuration["ALEXAPC_RELAY_URLS"];
+builder.WebHost.UseUrls(string.IsNullOrWhiteSpace(relayUrls)
+    ? "http://0.0.0.0:5184"
+    : relayUrls);
 
 builder.Services.AddSingleton<AgentConnectionManager>();
 
