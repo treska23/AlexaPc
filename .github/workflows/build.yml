@@ -30,6 +30,9 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Validate Alexa skill
+        run: node --test skill/tests/alexa-skill.test.cjs
+
       - name: Validate Cloudflare relay
         working-directory: cloudflare/worker
         run: |
