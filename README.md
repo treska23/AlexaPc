@@ -1,33 +1,47 @@
-# AlexaPc
+# AlexaPc / Bardo
 
-Agente de Windows para controlar el ordenador mediante comandos de voz de Alexa.
+Asistente local para Windows controlado por voz mediante Alexa.
 
-## Estado actual
+El proyecto empezó como un puente de comandos entre Alexa y el ordenador. La dirección actual es convertirlo en **Bardo**, un asistente local que entiende lenguaje natural, elige herramientas seguras y ejecuta flujos de trabajo en el PC sin depender de APIs de pago.
 
-AlexaPc ya tiene dos capas funcionales:
+## Arquitectura actual
 
-- `AlexaPc.Agent`: aplicación WPF que ejecuta los comandos en Windows.
-- `AlexaPc.Relay`: relay HTTP/WebSocket que recibe una orden remota y la envía al ordenador conectado.
+```text
+Alexa
+  -> Bardo Control
+  -> Cloudflare relay
+  -> AlexaPc.Agent
+  -> comando exacto? -> ejecución inmediata
+  -> texto libre? -> Llama local
+                  -> respuesta breve por Alexa
+                  -> o herramientas autorizadas en Windows
+```
 
-También se incluye el modelo `es-ES` de la Custom Skill y una Lambda Node.js que convierte la orden de voz en una llamada al relay.
+Componentes:
+
+- `AlexaPc.Agent`: aplicación WPF que ejecuta acciones en Windows y aloja el cerebro local.
+- `AlexaPc.Relay`: relay HTTP/WebSocket para desarrollo local.
+- Cloudflare Worker: relay público persistente entre Alexa y el ordenador.
+- Alexa Custom Skill `Bardo Control`.
+- Integración local con Ollama, LM Studio o llama.cpp.
 
 ### Implementado
 
 - WPF sobre .NET 10 y MVVM.
 - Configuración de comandos mediante `commands.json`.
 - Apertura de programas y URLs.
-- Play/Pause, pista siguiente/anterior, volumen y mute.
+- Play, pausa, siguiente/anterior, volumen y mute.
 - Bloquear, suspender, apagar y reiniciar Windows.
-- Icono propio integrado en el ejecutable y la barra de tareas.
-- Creación automática del acceso directo `AlexaPc.lnk` en el escritorio.
-- Arranque automático con Windows y funcionamiento en la bandeja del sistema.
-- Registro de conexión y órdenes en `%LOCALAPPDATA%\AlexaPc\logs`.
-- `relay.json` para configurar el transporte remoto.
-- Cliente WebSocket persistente con reconexión automática.
-- `AlexaPc.Relay` con autenticación de dispositivo y API key.
-- Respuesta de resultado del ordenador al relay.
+- Icono propio, bandeja del sistema y arranque con Windows.
+- Logs en `%LOCALAPPDATA%\AlexaPc\logs`.
+- Relay WebSocket persistente con reconexión automática.
 - Modelo de Skill en español (`bardo control`).
 - Lambda puente entre Alexa y el relay.
+- Interpretación de lenguaje natural mediante Llama local.
+- Detección automática de Ollama, LM Studio y llama.cpp.
+- Respuestas breves de Llama leídas por Alexa.
+- Selección de hasta cuatro herramientas autorizadas para peticiones compuestas.
+- Rechazo de herramientas inventadas y protección adicional para acciones de energía.
 - Build automática con GitHub Actions.
 
 ## Ejecutar el agente
@@ -42,7 +56,10 @@ La primera vez se crean automáticamente:
 ```text
 %LOCALAPPDATA%\AlexaPc\commands.json
 %LOCALAPPDATA%\AlexaPc\relay.json
+%LOCALAPPDATA%\AlexaPc\assistant.json
 ```
+
+La configuración de Llama local está documentada en [`docs/local-assistant.md`](docs/local-assistant.md).
 
 ## Probar el canal remoto localmente
 
@@ -63,10 +80,18 @@ Invoke-RestMethod `
   -Body '{"deviceId":"pc-principal","command":"youtube"}'
 ```
 
-Si se abre YouTube, funciona el recorrido:
+Si se abre YouTube, funciona el recorrido básico:
 
 ```text
 HTTP -> Relay -> WebSocket -> Agent -> CommandDispatcher -> Windows
+```
+
+Una petición que no coincida con un nombre de `commands.json` pasa al asistente local. Por ejemplo, con Ollama/LM Studio/llama.cpp arrancado:
+
+```text
+quiero ver YouTube
+abre YouTube y baja el volumen
+dime qué es un agujero negro
 ```
 
 ## Alexa
@@ -79,51 +104,51 @@ La invocación de la Skill es:
 bardo control
 ```
 
-Cuando la Skill esté desplegada y habilitada:
+Ejemplo directo:
 
 ```text
 Alexa, abre Bardo Control.
 ```
 
-Y después:
+Y después puede usarse un comando clásico:
 
 ```text
 abre YouTube
+```
+
+O lenguaje más natural:
+
+```text
+quiero ver YouTube
+necesito bajar el volumen
+dime qué es un agujero negro
 ```
 
 También puede usarse en una sola frase:
 
 ```text
 Alexa, dile a Bardo Control que abra YouTube.
+Alexa, dile a Bardo Control que quiero ver YouTube.
 ```
 
-Otra forma oficialmente soportada es:
+La elección del nombre de dos palabras y el diagnóstico de las invocaciones están documentados en [`docs/alexa-one-shot.md`](docs/alexa-one-shot.md).
 
-```text
-Alexa, abre Bardo Control y abre YouTube.
-```
+## Seguridad
 
-La elección del nombre de dos palabras es deliberada: Amazon no admite nombres de
-invocación de una sola palabra salvo marcas acreditadas. El diagnóstico y las
-frases válidas están documentados en
-[`docs/alexa-one-shot.md`](docs/alexa-one-shot.md).
+Llama no recibe capacidad para ejecutar código arbitrario. Solo puede elegir nombres existentes en `%LOCALAPPDATA%\AlexaPc\commands.json`.
 
-El agente solo ejecuta nombres existentes en `commands.json`; Alexa no puede mandar código arbitrario al equipo.
+Las acciones de apagar, reiniciar, suspender y bloquear requieren además una petición explícita del usuario; una inferencia indirecta del modelo no basta.
 
-## Encender y apagar
+## Dirección del proyecto
 
-Para apagar por software:
+La siguiente fase es ampliar el catálogo de herramientas seguras de Bardo:
 
-```text
-Alexa, dile a Bardo Control que apague el ordenador.
-```
+- abrir soluciones y proyectos de trabajo;
+- buscar archivos y consultar Git;
+- abrir proyectos concretos de ChatGPT en el navegador;
+- crear rutinas compuestas como `voy a dibujar` o `voy a tocar la batería`;
+- memoria local;
+- estado del sistema y procesos;
+- selección inteligente de herramientas por Llama.
 
-Las órdenes de energía usan siempre la palabra `ordenador`. La configuración del
-interruptor de Alexa y de la BIOS para poder decir simplemente `enciende
-ordenador` y `apaga ordenador` está en
-[`docs/power-control.md`](docs/power-control.md).
-
-## Siguiente fase
-
-- Sustituir el encendido por interruptor por Wake-on-LAN cuando haya un emisor
-  siempre encendido en la red local.
+El objetivo es que Alexa sea la interfaz de voz y Bardo/Llama el cerebro local del ordenador.
