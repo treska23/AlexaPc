@@ -76,7 +76,7 @@ function loadAlexaHostedTemplate() {
   return { exports: module.exports, logs };
 }
 
-test('interaction model supports the documented Spanish one-shot action', () => {
+test('interaction model supports documented and natural Spanish one-shot actions', () => {
   const model = JSON.parse(readStrictUtf8(modelPath));
   const languageModel = model.interactionModel.languageModel;
   const intent = languageModel.intents.find(({ name }) => name === 'ExecuteCommandIntent');
@@ -85,6 +85,10 @@ test('interaction model supports the documented Spanish one-shot action', () => 
   assert.equal(intent.slots[0].type, 'AMAZON.SearchQuery');
   assert.ok(intent.samples.includes('abra {command}'));
   assert.ok(intent.samples.includes('abre {command}'));
+  assert.ok(intent.samples.includes('quiero {command}'));
+  assert.ok(intent.samples.includes('necesito {command}'));
+  assert.ok(intent.samples.includes('dime {command}'));
+  assert.ok(intent.samples.includes('me diga {command}'));
   assert.equal(intent.samples.includes('que abra {command}'), false);
 
   const fixedIntents = new Map(languageModel.intents.map(item => [item.name, item]));
@@ -113,6 +117,8 @@ test('normalization keeps command aliases compatible with commands.json', () => 
   assert.equal(exports._test.commandForIntent('ShutdownComputerIntent'), 'apaga ordenador');
   assert.equal(exports._test.commandForIntent('AMAZON.PauseIntent'), 'pausa');
   assert.equal(exports._test.commandForIntent('AMAZON.HelpIntent'), null);
+  assert.equal(exports._test.extractAssistantMessage('[bardo] He encontrado una opción.'), 'He encontrado una opción.');
+  assert.equal(exports._test.extractAssistantMessage('Acción ejecutada.'), null);
 });
 
 test('environment-based Lambda keeps the same normalization behavior', async () => {
@@ -122,6 +128,7 @@ test('environment-based Lambda keeps the same normalization behavior', async () 
   assert.equal(lambda.normalizeCommand('Apaga el PC'), 'apaga ordenador');
   assert.equal(lambda.normalizeCommand('mi comando personalizado'), 'mi comando personalizado');
   assert.equal(lambda.commandForIntent('SleepComputerIntent'), 'suspende ordenador');
+  assert.equal(lambda.extractAssistantMessage('[bardo] Respuesta local.'), 'Respuesta local.');
 });
 
 test('LaunchRequest is logged without configuration or secrets', async () => {
