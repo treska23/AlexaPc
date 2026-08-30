@@ -40,10 +40,18 @@ public partial class App : System.Windows.Application
 
         var configurationService = new CommandConfigurationService();
         var relayConfigurationService = new RelayConfigurationService();
+        var assistantConfigurationService = new AssistantConfigurationService();
         var executionService = new CommandExecutionService();
-        var dispatcher = new CommandDispatcher(configurationService, executionService);
+        var llamaService = new LocalLlamaService(assistantConfigurationService, _log);
+        var assistantService = new LocalAssistantService(
+            configurationService,
+            executionService,
+            llamaService,
+            _log);
+        var dispatcher = new CommandDispatcher(configurationService, executionService, assistantService);
 
         relayConfigurationService.Load();
+        assistantConfigurationService.Load();
         _relayClient = new RelayClientService(relayConfigurationService, dispatcher, _log);
 
         var viewModel = new MainViewModel(
