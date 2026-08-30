@@ -6,13 +6,16 @@ public sealed class CommandDispatcher
 {
     private readonly CommandConfigurationService _configurationService;
     private readonly CommandExecutionService _executionService;
+    private readonly LocalAssistantService _assistantService;
 
     public CommandDispatcher(
         CommandConfigurationService configurationService,
-        CommandExecutionService executionService)
+        CommandExecutionService executionService,
+        LocalAssistantService assistantService)
     {
         _configurationService = configurationService;
         _executionService = executionService;
+        _assistantService = assistantService;
     }
 
     public Task<CommandResult> ExecuteAsync(CommandDefinition definition, CancellationToken cancellationToken = default)
@@ -24,8 +27,8 @@ public sealed class CommandDispatcher
             .Load()
             .FirstOrDefault(command => string.Equals(command.Name, commandName, StringComparison.OrdinalIgnoreCase));
 
-        return definition is null
-            ? Task.FromResult(CommandResult.Fail($"No existe el comando '{commandName}'."))
-            : _executionService.ExecuteAsync(definition, cancellationToken);
+        return definition is not null
+            ? _executionService.ExecuteAsync(definition, cancellationToken)
+            : _assistantService.HandleAsync(commandName, cancellationToken);
     }
 }
