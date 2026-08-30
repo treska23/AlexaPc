@@ -93,6 +93,12 @@ test('interaction model supports documented and natural Spanish one-shot actions
   assert.ok(intent.samples.includes('me diga {command}'));
   assert.equal(intent.samples.includes('que abra {command}'), false);
 
+  const whatIntent = languageModel.intents.find(({ name }) => name === 'WhatIsIntent');
+  const whyIntent = languageModel.intents.find(({ name }) => name === 'WhyQuestionIntent');
+  assert.equal(whatIntent.slots[0].type, 'AMAZON.SearchQuery');
+  assert.ok(whatIntent.samples.includes('qué es {topic}'));
+  assert.ok(whyIntent.samples.includes('por qué {subject}'));
+
   const fixedIntents = new Map(languageModel.intents.map(item => [item.name, item]));
   assert.ok(fixedIntents.has('AMAZON.PauseIntent'));
   assert.ok(fixedIntents.has('AMAZON.ResumeIntent'));
@@ -119,6 +125,13 @@ test('normalization keeps command aliases compatible with commands.json', () => 
   assert.equal(exports._test.commandForIntent('ShutdownComputerIntent'), 'apaga ordenador');
   assert.equal(exports._test.commandForIntent('AMAZON.PauseIntent'), 'pausa');
   assert.equal(exports._test.commandForIntent('AMAZON.HelpIntent'), null);
+  assert.equal(
+    exports._test.commandForQuestionIntent({
+      name: 'WhatIsIntent',
+      slots: { topic: { value: 'un agujero negro' } }
+    }),
+    'qué es un agujero negro'
+  );
   assert.equal(exports._test.extractAssistantMessage('[bardo] He encontrado una opción.'), 'He encontrado una opción.');
   assert.equal(exports._test.extractAssistantMessage('Acción ejecutada.'), null);
 });
@@ -130,6 +143,13 @@ test('environment-based Lambda keeps the same normalization behavior', async () 
   assert.equal(lambda.normalizeCommand('Apaga el PC'), 'apaga ordenador');
   assert.equal(lambda.normalizeCommand('mi comando personalizado'), 'mi comando personalizado');
   assert.equal(lambda.commandForIntent('SleepComputerIntent'), 'suspende ordenador');
+  assert.equal(
+    lambda.commandForQuestionIntent({
+      name: 'WhyQuestionIntent',
+      slots: { subject: { value: 'el cielo es azul' } }
+    }),
+    'por qué el cielo es azul'
+  );
   assert.equal(lambda.extractAssistantMessage('[bardo] Respuesta local.'), 'Respuesta local.');
   assert.equal(lambda.requestTimeoutMs, 7200);
 });

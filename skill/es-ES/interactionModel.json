@@ -69,6 +69,100 @@
           ]
         },
         {
+          "name": "WhatIsIntent",
+          "slots": [
+            {
+              "name": "topic",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "qué es {topic}",
+            "que es {topic}",
+            "qué son {topic}",
+            "que son {topic}",
+            "qué significa {topic}",
+            "que significa {topic}"
+          ]
+        },
+        {
+          "name": "WhoIsIntent",
+          "slots": [
+            {
+              "name": "person",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "quién es {person}",
+            "quien es {person}",
+            "quién fue {person}",
+            "quien fue {person}"
+          ]
+        },
+        {
+          "name": "HowQuestionIntent",
+          "slots": [
+            {
+              "name": "subject",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "cómo funciona {subject}",
+            "como funciona {subject}",
+            "cómo funcionan {subject}",
+            "como funcionan {subject}",
+            "cómo se hace {subject}",
+            "como se hace {subject}"
+          ]
+        },
+        {
+          "name": "WhyQuestionIntent",
+          "slots": [
+            {
+              "name": "subject",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "por qué {subject}",
+            "por que {subject}"
+          ]
+        },
+        {
+          "name": "WhereQuestionIntent",
+          "slots": [
+            {
+              "name": "subject",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "dónde está {subject}",
+            "donde está {subject}",
+            "dónde se encuentra {subject}",
+            "donde se encuentra {subject}"
+          ]
+        },
+        {
+          "name": "WhenQuestionIntent",
+          "slots": [
+            {
+              "name": "subject",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "cuándo es {subject}",
+            "cuando es {subject}",
+            "cuándo fue {subject}",
+            "cuando fue {subject}",
+            "cuándo ocurre {subject}",
+            "cuando ocurre {subject}"
+          ]
+        },
+        {
           "name": "ShutdownComputerIntent",
           "slots": [],
           "samples": [

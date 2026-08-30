@@ -23,6 +23,11 @@ export const handler = async (event) => {
       return executeAndRespond(fixedCommand);
     }
 
+    const naturalQuestion = commandForQuestionIntent(request.intent);
+    if (naturalQuestion) {
+      return executeAndRespond(naturalQuestion);
+    }
+
     if (intentName === "ExecuteCommandIntent") {
       const rawCommand = getCommandSlotValue(request);
       if (!rawCommand) {
@@ -60,6 +65,20 @@ function getCommandSlotValue(request) {
   return request.intent?.slots?.command?.value?.trim() || null;
 }
 
+export function commandForQuestionIntent(intent) {
+  const definitions = {
+    WhatIsIntent: { slot: "topic", prefix: "qué es" },
+    WhoIsIntent: { slot: "person", prefix: "quién es" },
+    HowQuestionIntent: { slot: "subject", prefix: "cómo funciona" },
+    WhyQuestionIntent: { slot: "subject", prefix: "por qué" },
+    WhereQuestionIntent: { slot: "subject", prefix: "dónde está" },
+    WhenQuestionIntent: { slot: "subject", prefix: "cuándo es" }
+  };
+  const definition = definitions[intent?.name];
+  const value = definition ? intent?.slots?.[definition.slot]?.value?.trim() : null;
+  return value ? `${definition.prefix} ${value}` : null;
+}
+
 function logRequest(request) {
   const isIntentRequest = request.type === "IntentRequest";
   const entry = {
@@ -69,7 +88,9 @@ function logRequest(request) {
     requestId: request.requestId ?? null,
     locale: request.locale ?? null,
     intentName: isIntentRequest ? request.intent?.name ?? null : null,
-    command: isIntentRequest ? getCommandSlotValue(request) : null
+    command: isIntentRequest
+      ? getCommandSlotValue(request) ?? commandForQuestionIntent(request.intent)
+      : null
   };
 
   console.info(JSON.stringify(entry));
