@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -7,6 +8,10 @@ namespace AlexaPc.Agent.Services;
 
 public sealed class LocalLlamaService
 {
+    private const int MinimumInferenceTimeoutSeconds = 2;
+    private const int MaximumInferenceTimeoutSeconds = 5;
+    private const string OllamaKeepAlive = "24h";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -15,7 +20,12 @@ public sealed class LocalLlamaService
     private readonly HttpClient _httpClient = new();
     private readonly AssistantConfigurationService _configurationService;
     private readonly AppLogService _log;
+    private readonly SemaphoreSlim _backendGate = new(1, 1);
+    private readonly SemaphoreSlim _inferenceGate = new(1, 1);
+    private readonly object _warmUpSync = new();
     private ResolvedBackend? _cachedBackend;
+    private BackendCacheKey? _cachedBackendKey;
+    private Task? _warmUpTask;
 
     public LocalLlamaService(
         AssistantConfigurationService configurationService,
@@ -36,57 +46,221 @@ public sealed class LocalLlamaService
             throw new InvalidOperationException("El asistente local está desactivado en assistant.json.");
         }
 
-        var backend = await ResolveBackendAsync(settings, cancellationToken).ConfigureAwait(false);
-        if (backend is null)
-        {
-            throw new InvalidOperationException(
-                "No encuentro un servidor local de Llama. Arranca Ollama, LM Studio o llama.cpp y vuelve a intentarlo.");
-        }
-
-        var systemPrompt = BuildSystemPrompt(commands);
-        string responseText;
-
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(settings.TimeoutSeconds, 2, 20)));
+        var timeoutSeconds = Math.Clamp(
+            settings.TimeoutSeconds,
+            MinimumInferenceTimeoutSeconds,
+            MaximumInferenceTimeoutSeconds);
+        timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        var stopwatch = Stopwatch.StartNew();
+        ResolvedBackend? backend = null;
 
         try
         {
-            responseText = backend.Provider == "ollama"
-                ? await CallOllamaAsync(backend, systemPrompt, utterance, timeout.Token).ConfigureAwait(false)
-                : await CallOpenAiCompatibleAsync(backend, systemPrompt, utterance, timeout.Token).ConfigureAwait(false);
+            backend = await ResolveBackendAsync(settings, timeout.Token).ConfigureAwait(false);
+            if (backend is null)
+            {
+                throw new InvalidOperationException(
+                    "No encuentro un servidor local de Llama. Arranca Ollama, LM Studio o llama.cpp y vuelve a intentarlo.");
+            }
+
+            var systemPrompt = BuildSystemPrompt(commands);
+            string responseText;
+
+            await _inferenceGate.WaitAsync(timeout.Token).ConfigureAwait(false);
+            try
+            {
+                _log.Info("local_llama_inference_started", new
+                {
+                    provider = backend.Provider,
+                    model = backend.Model,
+                    timeoutSeconds
+                });
+
+                responseText = backend.Provider == "ollama"
+                    ? await CallOllamaAsync(backend, systemPrompt, utterance, timeout.Token).ConfigureAwait(false)
+                    : await CallOpenAiCompatibleAsync(backend, systemPrompt, utterance, timeout.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _inferenceGate.Release();
+            }
+
+            var decision = ParseDecision(responseText, commands);
+            _log.Info("local_assistant_decision", new
+            {
+                provider = backend.Provider,
+                model = backend.Model,
+                kind = decision.Kind,
+                commands = decision.Commands,
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
+
+            return decision;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            _log.Info("local_llama_inference_timed_out", new
+            {
+                provider = backend?.Provider,
+                model = backend?.Model,
+                timeoutSeconds,
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
+            _ = WarmUpAsync();
             throw new TimeoutException("Llama local ha tardado demasiado en responder.");
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            _cachedBackend = null;
+            InvalidateBackend();
+            _log.Error("local_llama_http_failed", ex, new
+            {
+                provider = backend?.Provider,
+                model = backend?.Model,
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
             throw;
         }
+    }
 
-        var decision = ParseDecision(responseText, commands);
-        _log.Info("local_assistant_decision", new
+    public Task WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        lock (_warmUpSync)
         {
-            provider = backend.Provider,
-            model = backend.Model,
-            kind = decision.Kind,
-            commands = decision.Commands
-        });
+            if (_warmUpTask is { IsCompleted: false })
+            {
+                return _warmUpTask;
+            }
 
-        return decision;
+            _warmUpTask = WarmUpCoreAsync(cancellationToken);
+            return _warmUpTask;
+        }
+    }
+
+    private async Task WarmUpCoreAsync(CancellationToken cancellationToken)
+    {
+        var settings = _configurationService.Load();
+        if (!settings.Enabled)
+        {
+            _log.Info("local_assistant_warmup_skipped", new { reason = "disabled" });
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        _log.Info("local_assistant_warmup_started");
+
+        try
+        {
+            var backend = await ResolveBackendAsync(settings, cancellationToken).ConfigureAwait(false);
+            if (backend is null)
+            {
+                throw new InvalidOperationException("No hay ningún servidor local de Llama disponible.");
+            }
+
+            if (backend.Provider == "ollama")
+            {
+                await _inferenceGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await WarmUpOllamaAsync(backend, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _inferenceGate.Release();
+                }
+            }
+
+            _log.Info("local_assistant_warmup_completed", new
+            {
+                provider = backend.Provider,
+                model = backend.Model,
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            _log.Info("local_assistant_warmup_cancelled", new
+            {
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
+        }
+        catch (Exception ex)
+        {
+            InvalidateBackend();
+            _log.Error("local_assistant_warmup_failed", ex, new
+            {
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
+        }
     }
 
     private async Task<ResolvedBackend?> ResolveBackendAsync(
         AssistantSettings settings,
         CancellationToken cancellationToken)
     {
-        if (_cachedBackend is not null)
+        var cacheKey = BackendCacheKey.From(settings);
+        if (_cachedBackend is not null && _cachedBackendKey == cacheKey)
         {
+            _log.Info("local_llama_backend_cache_hit", new
+            {
+                provider = _cachedBackend.Provider,
+                model = _cachedBackend.Model
+            });
             return _cachedBackend;
         }
 
-        var provider = (settings.Provider ?? "auto").Trim().ToLowerInvariant();
+        await _backendGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_cachedBackend is not null && _cachedBackendKey == cacheKey)
+            {
+                return _cachedBackend;
+            }
+
+            _log.Info("local_llama_backend_discovery_started", new
+            {
+                provider = cacheKey.Provider,
+                configuredModel = !string.IsNullOrWhiteSpace(cacheKey.Model)
+            });
+
+            var candidates = BuildCandidates(settings, cacheKey.Provider);
+            foreach (var candidate in candidates.Distinct())
+            {
+                var model = await TryResolveModelAsync(
+                        candidate.Provider,
+                        candidate.BaseUrl,
+                        settings.Model,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (string.IsNullOrWhiteSpace(model))
+                {
+                    continue;
+                }
+
+                _cachedBackend = new ResolvedBackend(candidate.Provider, candidate.BaseUrl, model);
+                _cachedBackendKey = cacheKey;
+                _log.Info("local_llama_backend_resolved", new
+                {
+                    provider = candidate.Provider,
+                    model
+                });
+                return _cachedBackend;
+            }
+
+            return null;
+        }
+        finally
+        {
+            _backendGate.Release();
+        }
+    }
+
+    private static IReadOnlyList<(string Provider, string BaseUrl)> BuildCandidates(
+        AssistantSettings settings,
+        string provider)
+    {
         var candidates = new List<(string Provider, string BaseUrl)>();
 
         if (!string.IsNullOrWhiteSpace(settings.BaseUrl))
@@ -116,23 +290,7 @@ public sealed class LocalLlamaService
             }
         }
 
-        foreach (var candidate in candidates.Distinct())
-        {
-            var model = await TryResolveModelAsync(
-                    candidate.Provider,
-                    candidate.BaseUrl,
-                    settings.Model,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            if (!string.IsNullOrWhiteSpace(model))
-            {
-                _cachedBackend = new ResolvedBackend(candidate.Provider, candidate.BaseUrl, model);
-                return _cachedBackend;
-            }
-        }
-
-        return null;
+        return candidates;
     }
 
     private async Task<string?> TryResolveModelAsync(
@@ -141,6 +299,7 @@ public sealed class LocalLlamaService
         string? configuredModel,
         CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMilliseconds(1300));
 
@@ -153,11 +312,25 @@ public sealed class LocalLlamaService
             using var response = await _httpClient.GetAsync(url, timeout.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
+                _log.Info("local_llama_backend_probe_completed", new
+                {
+                    provider,
+                    success = false,
+                    status = (int)response.StatusCode,
+                    durationMs = stopwatch.ElapsedMilliseconds
+                });
                 return null;
             }
 
             if (!string.IsNullOrWhiteSpace(configuredModel))
             {
+                _log.Info("local_llama_backend_probe_completed", new
+                {
+                    provider,
+                    success = true,
+                    configuredModel = true,
+                    durationMs = stopwatch.ElapsedMilliseconds
+                });
                 return configuredModel.Trim();
             }
 
@@ -167,11 +340,54 @@ public sealed class LocalLlamaService
                 ? ReadOllamaModels(document.RootElement)
                 : ReadOpenAiModels(document.RootElement);
 
-            return ChooseModel(modelNames);
+            var model = ChooseModel(modelNames);
+            _log.Info("local_llama_backend_probe_completed", new
+            {
+                provider,
+                success = model is not null,
+                configuredModel = false,
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
+            return model;
         }
-        catch
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _log.Info("local_llama_backend_probe_failed", new
+            {
+                provider,
+                errorType = ex.GetType().Name,
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
             return null;
+        }
+    }
+
+    private async Task WarmUpOllamaAsync(
+        ResolvedBackend backend,
+        CancellationToken cancellationToken)
+    {
+        var payload = new
+        {
+            model = backend.Model,
+            prompt = string.Empty,
+            stream = false,
+            keep_alive = OllamaKeepAlive,
+            options = new { num_predict = 1 }
+        };
+
+        using var response = await PostJsonAsync(
+                $"{backend.BaseUrl}/api/generate",
+                payload,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException($"Ollama no pudo precargar el modelo (HTTP {(int)response.StatusCode}).");
         }
     }
 
@@ -186,7 +402,8 @@ public sealed class LocalLlamaService
             model = backend.Model,
             stream = false,
             format = "json",
-            keep_alive = "30m",
+            think = false,
+            keep_alive = OllamaKeepAlive,
             messages = new object[]
             {
                 new { role = "system", content = systemPrompt },
@@ -218,7 +435,13 @@ public sealed class LocalLlamaService
             throw new InvalidOperationException("Ollama no ha devuelto una respuesta válida.");
         }
 
-        return content.GetString() ?? string.Empty;
+        var result = content.GetString() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            throw new InvalidOperationException("Ollama ha devuelto contenido vacío.");
+        }
+
+        return result;
     }
 
     private async Task<string> CallOpenAiCompatibleAsync(
@@ -420,7 +643,21 @@ Herramientas autorizadas:
 
     private static string NormalizeBaseUrl(string baseUrl) => baseUrl.Trim().TrimEnd('/');
 
+    private void InvalidateBackend()
+    {
+        _cachedBackend = null;
+        _cachedBackendKey = null;
+    }
+
     private sealed record ResolvedBackend(string Provider, string BaseUrl, string Model);
+
+    private sealed record BackendCacheKey(string Provider, string? BaseUrl, string? Model)
+    {
+        public static BackendCacheKey From(AssistantSettings settings) => new(
+            (settings.Provider ?? "auto").Trim().ToLowerInvariant(),
+            string.IsNullOrWhiteSpace(settings.BaseUrl) ? null : NormalizeBaseUrl(settings.BaseUrl),
+            string.IsNullOrWhiteSpace(settings.Model) ? null : settings.Model.Trim());
+    }
 
     private sealed class ModelDecision
     {

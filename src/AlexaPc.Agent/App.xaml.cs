@@ -41,14 +41,14 @@ public partial class App : System.Windows.Application
         var configurationService = new CommandConfigurationService();
         var relayConfigurationService = new RelayConfigurationService();
         var assistantConfigurationService = new AssistantConfigurationService();
-        var executionService = new CommandExecutionService();
+        var executionService = new CommandExecutionService(_log);
         var llamaService = new LocalLlamaService(assistantConfigurationService, _log);
         var assistantService = new LocalAssistantService(
             configurationService,
             executionService,
             llamaService,
             _log);
-        var dispatcher = new CommandDispatcher(configurationService, executionService, assistantService);
+        var dispatcher = new CommandDispatcher(configurationService, executionService, assistantService, _log);
 
         relayConfigurationService.Load();
         assistantConfigurationService.Load();
@@ -89,6 +89,7 @@ public partial class App : System.Windows.Application
 
         new DesktopShortcutService().EnsureShortcuts();
         _relayClient.Start();
+        _ = llamaService.WarmUpAsync();
     }
 
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e)

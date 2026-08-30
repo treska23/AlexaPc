@@ -3,6 +3,7 @@ using System.IO;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using AlexaPc.Agent.Models;
 
 namespace AlexaPc.Agent.Services;
 
@@ -13,6 +14,7 @@ public sealed class RelayClientService : IAsyncDisposable
     private readonly RelayConfigurationService _configurationService;
     private readonly CommandDispatcher _dispatcher;
     private readonly AppLogService _log;
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
     private CancellationTokenSource? _lifetime;
     private Task? _worker;
     private string? _lastConnectionLabel;
@@ -115,81 +117,196 @@ public sealed class RelayClientService : IAsyncDisposable
     {
         var buffer = new byte[8192];
         var segment = new ArraySegment<byte>(buffer);
+        var activeCommands = new HashSet<Task>();
 
-        while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+        try
         {
-            using var stream = new MemoryStream();
-            WebSocketReceiveResult result;
-
-            do
+            while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
             {
-                result = await socket.ReceiveAsync(segment, cancellationToken).ConfigureAwait(false);
+                using var stream = new MemoryStream();
+                WebSocketReceiveResult result;
 
-                if (result.MessageType == WebSocketMessageType.Close)
+                do
                 {
-                    _log.Info("relay_connection_closed", new
-                    {
-                        closeStatus = result.CloseStatus?.ToString(),
-                        reason = result.CloseStatusDescription
-                    });
+                    result = await socket.ReceiveAsync(segment, cancellationToken).ConfigureAwait(false);
 
-                    await socket.CloseOutputAsync(
-                        WebSocketCloseStatus.NormalClosure,
-                        "Closing",
-                        CancellationToken.None).ConfigureAwait(false);
-                    return;
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        _log.Info("relay_connection_closed", new
+                        {
+                            closeStatus = result.CloseStatus?.ToString(),
+                            reason = result.CloseStatusDescription
+                        });
+
+                        await socket.CloseOutputAsync(
+                            WebSocketCloseStatus.NormalClosure,
+                            "Closing",
+                            CancellationToken.None).ConfigureAwait(false);
+                        return;
+                    }
+
+                    stream.Write(buffer, 0, result.Count);
+                }
+                while (!result.EndOfMessage);
+
+                if (result.MessageType != WebSocketMessageType.Text)
+                {
+                    continue;
                 }
 
-                stream.Write(buffer, 0, result.Count);
+                var json = Encoding.UTF8.GetString(stream.ToArray());
+                RelayCommandMessage? request;
+                try
+                {
+                    request = JsonSerializer.Deserialize<RelayCommandMessage>(json, JsonOptions);
+                }
+                catch (JsonException ex)
+                {
+                    _log.Error("relay_message_invalid", ex);
+                    continue;
+                }
+
+                if (request is null ||
+                    !string.Equals(request.Type, "execute", StringComparison.OrdinalIgnoreCase) ||
+                    string.IsNullOrWhiteSpace(request.RequestId))
+                {
+                    continue;
+                }
+
+                var commandTask = ProcessCommandAsync(socket, request, cancellationToken);
+                lock (activeCommands)
+                {
+                    activeCommands.Add(commandTask);
+                }
+
+                _ = commandTask.ContinueWith(
+                    completedTask =>
+                    {
+                        lock (activeCommands)
+                        {
+                            activeCommands.Remove(completedTask);
+                        }
+                    },
+                    CancellationToken.None,
+                    TaskContinuationOptions.ExecuteSynchronously,
+                    TaskScheduler.Default);
             }
-            while (!result.EndOfMessage);
-
-            if (result.MessageType != WebSocketMessageType.Text)
+        }
+        finally
+        {
+            Task[] remaining;
+            lock (activeCommands)
             {
-                continue;
+                remaining = activeCommands.ToArray();
             }
 
-            var json = Encoding.UTF8.GetString(stream.ToArray());
-            var request = JsonSerializer.Deserialize<RelayCommandMessage>(json, JsonOptions);
-
-            if (request is null || !string.Equals(request.Type, "execute", StringComparison.OrdinalIgnoreCase))
+            if (remaining.Length > 0)
             {
-                continue;
+                try
+                {
+                    await Task.WhenAll(remaining)
+                        .WaitAsync(TimeSpan.FromSeconds(2))
+                        .ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Cada tarea registra su resultado; aquí solo evitamos bloquear la reconexión.
+                }
             }
+        }
+    }
 
-            var stopwatch = Stopwatch.StartNew();
-            _log.Info("remote_command_received", new
+    private async Task ProcessCommandAsync(
+        ClientWebSocket socket,
+        RelayCommandMessage request,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        _log.Info("remote_command_received", new
+        {
+            requestId = request.RequestId,
+            command = request.Command
+        });
+
+        CommandResult commandResult;
+        try
+        {
+            commandResult = string.IsNullOrWhiteSpace(request.Command)
+                ? CommandResult.Fail("La orden recibida está vacía.")
+                : await _dispatcher
+                    .ExecuteByNameAsync(request.Command, cancellationToken)
+                    .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException ex)
+        {
+            _log.Error("remote_command_cancelled", ex, new { requestId = request.RequestId });
+            commandResult = CommandResult.Fail("La orden se canceló antes de terminar.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("remote_command_failed", ex, new { requestId = request.RequestId });
+            commandResult = CommandResult.Fail("El agente no pudo completar la orden.");
+        }
+
+        _log.Info("remote_command_completed", new
+        {
+            requestId = request.RequestId,
+            command = request.Command,
+            success = commandResult.Success,
+            durationMs = stopwatch.ElapsedMilliseconds
+        });
+
+        await SendResultAsync(socket, request.RequestId, commandResult).ConfigureAwait(false);
+    }
+
+    private async Task SendResultAsync(
+        ClientWebSocket socket,
+        string requestId,
+        CommandResult commandResult)
+    {
+        var response = new RelayResultMessage(
+            "result",
+            requestId,
+            commandResult.Success,
+            commandResult.Message);
+
+        var responseJson = JsonSerializer.Serialize(response, JsonOptions);
+        var responseBytes = Encoding.UTF8.GetBytes(responseJson);
+        using var sendTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(1500));
+        var gateAcquired = false;
+
+        try
+        {
+            await _sendGate.WaitAsync(sendTimeout.Token).ConfigureAwait(false);
+            gateAcquired = true;
+
+            if (socket.State != WebSocketState.Open)
             {
-                requestId = request.RequestId,
-                command = request.Command
-            });
-
-            var commandResult = await _dispatcher
-                .ExecuteByNameAsync(request.Command, cancellationToken)
-                .ConfigureAwait(false);
-
-            _log.Info("remote_command_completed", new
-            {
-                requestId = request.RequestId,
-                command = request.Command,
-                success = commandResult.Success,
-                durationMs = stopwatch.ElapsedMilliseconds
-            });
-
-            var response = new RelayResultMessage(
-                "result",
-                request.RequestId,
-                commandResult.Success,
-                commandResult.Message);
-
-            var responseJson = JsonSerializer.Serialize(response, JsonOptions);
-            var responseBytes = Encoding.UTF8.GetBytes(responseJson);
+                throw new WebSocketException("La conexión se cerró antes de enviar el resultado.");
+            }
 
             await socket.SendAsync(
                 new ArraySegment<byte>(responseBytes),
                 WebSocketMessageType.Text,
                 true,
-                cancellationToken).ConfigureAwait(false);
+                sendTimeout.Token).ConfigureAwait(false);
+
+            _log.Info("remote_result_sent", new
+            {
+                requestId,
+                success = commandResult.Success
+            });
+        }
+        catch (Exception ex)
+        {
+            _log.Error("remote_result_send_failed", ex, new { requestId });
+        }
+        finally
+        {
+            if (gateAcquired)
+            {
+                _sendGate.Release();
+            }
         }
     }
 

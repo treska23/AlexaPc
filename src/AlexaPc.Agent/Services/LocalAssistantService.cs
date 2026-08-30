@@ -28,6 +28,7 @@ public sealed class LocalAssistantService
         CancellationToken cancellationToken = default)
     {
         var commands = _commandConfigurationService.Load();
+        _log.Info("local_assistant_started", new { utterance });
 
         try
         {
@@ -37,13 +38,21 @@ public sealed class LocalAssistantService
 
             if (decision.Kind is "reply" or "clarify")
             {
+                _log.Info("local_assistant_reply_ready", new { decision.Kind });
                 return CommandResult.Ok(SpokenPrefix + decision.Reply);
             }
 
             foreach (var commandName in decision.Commands)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (!IsDangerousCommandExplicitlyRequested(commandName, utterance))
                 {
+                    _log.Info("local_assistant_tool_rejected", new
+                    {
+                        command = commandName,
+                        reason = "explicit_confirmation_required"
+                    });
                     return CommandResult.Ok(
                         SpokenPrefix + "Ese comando necesita una petición explícita para ejecutarse.");
                 }
@@ -57,6 +66,7 @@ public sealed class LocalAssistantService
 
                 if (!result.Success)
                 {
+                    _log.Info("local_assistant_tool_failed", new { command = commandName });
                     return result;
                 }
             }
@@ -64,10 +74,20 @@ public sealed class LocalAssistantService
             var reply = string.IsNullOrWhiteSpace(decision.Reply) ? "Hecho." : decision.Reply;
             return CommandResult.Ok(SpokenPrefix + reply);
         }
+        catch (TimeoutException ex)
+        {
+            _log.Error("local_assistant_timed_out", ex, new { utterance });
+            return CommandResult.Fail("El asistente local no respondió a tiempo. Vuelve a intentarlo.");
+        }
+        catch (OperationCanceledException ex)
+        {
+            _log.Error("local_assistant_cancelled", ex, new { utterance });
+            return CommandResult.Fail("La orden se canceló antes de terminar.");
+        }
         catch (Exception ex)
         {
             _log.Error("local_assistant_failed", ex);
-            return CommandResult.Fail(ex.Message);
+            return CommandResult.Fail("El asistente local no pudo completar la petición.");
         }
     }
 
