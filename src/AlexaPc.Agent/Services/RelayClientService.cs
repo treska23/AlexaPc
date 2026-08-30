@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Net.WebSockets;
 using System.Text;
@@ -11,15 +12,19 @@ public sealed class RelayClientService : IAsyncDisposable
 
     private readonly RelayConfigurationService _configurationService;
     private readonly CommandDispatcher _dispatcher;
+    private readonly AppLogService _log;
     private CancellationTokenSource? _lifetime;
     private Task? _worker;
+    private string? _lastConnectionLabel;
 
     public RelayClientService(
         RelayConfigurationService configurationService,
-        CommandDispatcher dispatcher)
+        CommandDispatcher dispatcher,
+        AppLogService log)
     {
         _configurationService = configurationService;
         _dispatcher = dispatcher;
+        _log = log;
     }
 
     public event EventHandler<RelayConnectionStateChangedEventArgs>? ConnectionStateChanged;
@@ -78,19 +83,26 @@ public sealed class RelayClientService : IAsyncDisposable
 
                 using var socket = new ClientWebSocket();
                 socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+                socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(10);
 
                 var uri = BuildUri(settings.RelayUrl, settings.DeviceId, settings.DeviceToken);
                 await socket.ConnectAsync(uri, cancellationToken).ConfigureAwait(false);
 
                 Publish(true, "RELAY · CONECTADO");
                 await ReceiveLoopAsync(socket, cancellationToken).ConfigureAwait(false);
+
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 break;
             }
-            catch
+            catch (Exception ex)
             {
+                _log.Error("relay_connection_failed", ex);
                 Publish(false, "RELAY · REINTENTANDO");
                 await Task.Delay(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
             }
@@ -115,6 +127,12 @@ public sealed class RelayClientService : IAsyncDisposable
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
+                    _log.Info("relay_connection_closed", new
+                    {
+                        closeStatus = result.CloseStatus?.ToString(),
+                        reason = result.CloseStatusDescription
+                    });
+
                     await socket.CloseOutputAsync(
                         WebSocketCloseStatus.NormalClosure,
                         "Closing",
@@ -139,9 +157,24 @@ public sealed class RelayClientService : IAsyncDisposable
                 continue;
             }
 
+            var stopwatch = Stopwatch.StartNew();
+            _log.Info("remote_command_received", new
+            {
+                requestId = request.RequestId,
+                command = request.Command
+            });
+
             var commandResult = await _dispatcher
                 .ExecuteByNameAsync(request.Command, cancellationToken)
                 .ConfigureAwait(false);
+
+            _log.Info("remote_command_completed", new
+            {
+                requestId = request.RequestId,
+                command = request.Command,
+                success = commandResult.Success,
+                durationMs = stopwatch.ElapsedMilliseconds
+            });
 
             var response = new RelayResultMessage(
                 "result",
@@ -168,7 +201,15 @@ public sealed class RelayClientService : IAsyncDisposable
     }
 
     private void Publish(bool isConnected, string label)
-        => ConnectionStateChanged?.Invoke(this, new RelayConnectionStateChangedEventArgs(isConnected, label));
+    {
+        if (!string.Equals(_lastConnectionLabel, label, StringComparison.Ordinal))
+        {
+            _lastConnectionLabel = label;
+            _log.Info("relay_state_changed", new { isConnected, label });
+        }
+
+        ConnectionStateChanged?.Invoke(this, new RelayConnectionStateChangedEventArgs(isConnected, label));
+    }
 
     private sealed record RelayCommandMessage(string Type, string RequestId, string Command);
     private sealed record RelayResultMessage(string Type, string RequestId, bool Success, string Message);

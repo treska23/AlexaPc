@@ -21,7 +21,7 @@ debe resolver el modelo de la Skill es `abra YouTube`, que coincide con la muest
 entrenar una duplicación artificial del conector.
 
 El fallo anterior ocurría antes de Lambda. La prueba es que no había respuesta ni
-registro de petición mientras el flujo en dos turnos sí llegaba al PC. Sin el
+registro de petición mientras el flujo en dos turnos sí llegaba al ordenador. Sin el
 historial de voz de Alexa no se puede demostrar qué transcripción concreta produjo
 el dispositivo, pero sí hay una anomalía objetiva en el modelo: `bardo` incumple la
 regla general de Amazon que prohíbe nombres de invocación de una sola palabra salvo
@@ -77,7 +77,7 @@ No se registran la API key, la URL del relay ni el identificador del dispositivo
 - Si no aparece ninguna línea, Alexa no ha enrutado la frase a la Skill.
 - Si aparece `LaunchRequest`, Alexa abrió la Skill sin resolver la acción.
 - Si aparece `IntentRequest` con `ExecuteCommandIntent`, la invocación one-shot ya
-  está resuelta y cualquier fallo posterior pertenece a Lambda, relay o PC.
+  está resuelta y cualquier fallo posterior pertenece a Lambda, relay u ordenador.
 
 ## Fuentes oficiales consultadas
 

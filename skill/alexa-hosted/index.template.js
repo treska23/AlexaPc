@@ -3,26 +3,22 @@ const https = require('https');
 const RELAY_URL = __RELAY_URL_JSON__;
 const RELAY_API_KEY = __RELAY_API_KEY_JSON__;
 const DEVICE_ID = __DEVICE_ID_JSON__;
+const REQUEST_TIMEOUT_MS = 6500;
 
 exports.handler = async (event) => {
   const request = event?.request ?? {};
   logRequest(request);
 
   if (request.type === 'LaunchRequest') {
-    return ask('Bardo Control listo. ¿Qué quieres que haga?', 'Puedes decir, por ejemplo, abre YouTube, pausa o reanuda.');
+    return ask('Bardo Control listo. ¿Qué quieres que haga?', 'Puedes decir, por ejemplo, abre YouTube, pausa o apaga el ordenador.');
   }
 
   if (request.type === 'IntentRequest') {
     const intentName = request.intent?.name;
 
-    if (intentName === 'AMAZON.PauseIntent' || intentName === 'MediaPauseIntent') {
-      const result = await executeRemoteCommand('pausa');
-      return speak(result.success ? 'Hecho.' : result.message);
-    }
-
-    if (intentName === 'AMAZON.ResumeIntent' || intentName === 'MediaPlayIntent') {
-      const result = await executeRemoteCommand('reproduce');
-      return speak(result.success ? 'Hecho.' : result.message);
+    const fixedCommand = commandForIntent(intentName);
+    if (fixedCommand) {
+      return executeAndRespond(fixedCommand);
     }
 
     if (intentName === 'ExecuteCommandIntent') {
@@ -32,13 +28,12 @@ exports.handler = async (event) => {
       }
 
       const command = normalizeCommand(rawCommand);
-      const result = await executeRemoteCommand(command);
-      return speak(result.success ? 'Hecho.' : result.message);
+      return executeAndRespond(command);
     }
 
     if (intentName === 'AMAZON.HelpIntent') {
       return ask(
-        'Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube, pausa, reanuda o reproduce.',
+        'Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube, pausa, reanuda o apaga el ordenador.',
         '¿Qué quieres que haga?'
       );
     }
@@ -48,7 +43,7 @@ exports.handler = async (event) => {
     }
 
     if (intentName === 'AMAZON.FallbackIntent') {
-      return ask('No he reconocido esa orden de Bardo Control.', 'Prueba con abre YouTube, pausa o reanuda.');
+      return ask('No he reconocido esa orden de Bardo Control.', 'Prueba con abre YouTube, pausa o apaga el ordenador.');
     }
   }
 
@@ -56,7 +51,7 @@ exports.handler = async (event) => {
     return { version: '1.0', response: {} };
   }
 
-  return ask('¿Qué quieres que haga en el PC?', 'Puedes decir abre YouTube, pausa o reanuda.');
+  return ask('¿Qué quieres que haga en el ordenador?', 'Puedes decir abre YouTube.');
 };
 
 function getCommandSlotValue(request) {
@@ -121,6 +116,30 @@ function normalizeCommand(value) {
   return aliases[normalized] ?? normalized;
 }
 
+function commandForIntent(intentName) {
+  const commands = {
+    'AMAZON.PauseIntent': 'pausa',
+    'AMAZON.ResumeIntent': 'reproduce',
+    MediaPauseIntent: 'pausa',
+    MediaPlayIntent: 'reproduce',
+    ShutdownComputerIntent: 'apaga ordenador',
+    RestartComputerIntent: 'reinicia ordenador',
+    SleepComputerIntent: 'suspende ordenador',
+    LockComputerIntent: 'bloquea ordenador'
+  };
+
+  return commands[intentName] ?? null;
+}
+
+async function executeAndRespond(command) {
+  const result = await executeRemoteCommand(command);
+  if (!result.success) {
+    return speak(result.message);
+  }
+
+  return speak(command.endsWith('ordenador') ? result.message : 'Hecho.');
+}
+
 function executeRemoteCommand(command) {
   return new Promise((resolve) => {
     let endpoint;
@@ -143,7 +162,7 @@ function executeRemoteCommand(command) {
         'content-length': Buffer.byteLength(body),
         'x-alexapc-api-key': RELAY_API_KEY
       },
-      timeout: 8000
+      timeout: REQUEST_TIMEOUT_MS
     }, (res) => {
       let data = '';
       res.setEncoding('utf8');
@@ -162,7 +181,7 @@ function executeRemoteCommand(command) {
 
         resolve({
           success: false,
-          message: payload.message ?? 'No he podido comunicarme con el PC.'
+          message: payload.message ?? 'No he podido comunicarme con el ordenador.'
         });
       });
     });
@@ -172,7 +191,7 @@ function executeRemoteCommand(command) {
     });
 
     req.on('error', () => {
-      resolve({ success: false, message: 'No he podido conectar con el servicio del PC.' });
+      resolve({ success: false, message: 'No he podido conectar con el servicio del ordenador.' });
     });
 
     req.write(body);
@@ -201,4 +220,4 @@ function ask(text, reprompt) {
   };
 }
 
-exports._test = { normalizeCommand };
+exports._test = { normalizeCommand, commandForIntent };

@@ -1,13 +1,13 @@
 # AlexaPc
 
-Agente de Windows para controlar el PC mediante comandos de voz de Alexa.
+Agente de Windows para controlar el ordenador mediante comandos de voz de Alexa.
 
 ## Estado actual
 
 AlexaPc ya tiene dos capas funcionales:
 
 - `AlexaPc.Agent`: aplicación WPF que ejecuta los comandos en Windows.
-- `AlexaPc.Relay`: relay HTTP/WebSocket que recibe una orden remota y la envía al PC conectado.
+- `AlexaPc.Relay`: relay HTTP/WebSocket que recibe una orden remota y la envía al ordenador conectado.
 
 También se incluye el modelo `es-ES` de la Custom Skill y una Lambda Node.js que convierte la orden de voz en una llamada al relay.
 
@@ -20,10 +20,12 @@ También se incluye el modelo `es-ES` de la Custom Skill y una Lambda Node.js qu
 - Bloquear, suspender, apagar y reiniciar Windows.
 - Icono propio integrado en el ejecutable y la barra de tareas.
 - Creación automática del acceso directo `AlexaPc.lnk` en el escritorio.
+- Arranque automático con Windows y funcionamiento en la bandeja del sistema.
+- Registro de conexión y órdenes en `%LOCALAPPDATA%\AlexaPc\logs`.
 - `relay.json` para configurar el transporte remoto.
 - Cliente WebSocket persistente con reconexión automática.
 - `AlexaPc.Relay` con autenticación de dispositivo y API key.
-- Respuesta de resultado del PC al relay.
+- Respuesta de resultado del ordenador al relay.
 - Modelo de Skill en español (`bardo control`).
 - Lambda puente entre Alexa y el relay.
 - Build automática con GitHub Actions.
@@ -108,7 +110,20 @@ frases válidas están documentados en
 
 El agente solo ejecuta nombres existentes en `commands.json`; Alexa no puede mandar código arbitrario al equipo.
 
+## Encender y apagar
+
+Para apagar por software:
+
+```text
+Alexa, dile a Bardo Control que apague el ordenador.
+```
+
+Las órdenes de energía usan siempre la palabra `ordenador`. La configuración del
+interruptor de Alexa y de la BIOS para poder decir simplemente `enciende
+ordenador` y `apaga ordenador` está en
+[`docs/power-control.md`](docs/power-control.md).
+
 ## Siguiente fase
 
-- Añadir bandeja del sistema y arranque automático con Windows.
-- Añadir Wake-on-LAN para encender el PC cuando esté apagado.
+- Sustituir el encendido por interruptor por Wake-on-LAN cuando haya un emisor
+  siempre encendido en la red local.

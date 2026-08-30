@@ -31,42 +31,39 @@ public sealed class BuiltInActionService
                 return await SetPlaybackStateAsync(play: false, cancellationToken);
             case "media.playpause":
                 PressMediaKey(VkMediaPlayPause);
-                break;
+                return CommandResult.Ok("Hecho.");
             case "media.next":
                 PressMediaKey(VkMediaNextTrack);
-                break;
+                return CommandResult.Ok("Hecho.");
             case "media.previous":
                 PressMediaKey(VkMediaPrevTrack);
-                break;
+                return CommandResult.Ok("Hecho.");
             case "volume.mute":
                 PressMediaKey(VkVolumeMute);
-                break;
+                return CommandResult.Ok("Hecho.");
             case "volume.up":
                 PressMediaKey(VkVolumeUp);
-                break;
+                return CommandResult.Ok("Hecho.");
             case "volume.down":
                 PressMediaKey(VkVolumeDown);
-                break;
+                return CommandResult.Ok("Hecho.");
             case "system.lock":
                 StartSystemProcess("rundll32.exe", "user32.dll,LockWorkStation");
-                break;
+                return CommandResult.Ok("Ordenador bloqueado.");
             case "system.sleep":
-                if (!SetSuspendState(false, false, false))
-                {
-                    return CommandResult.Fail("Windows no pudo suspender el equipo.");
-                }
-                break;
+                StartSystemProcess(
+                    "cmd.exe",
+                    "/c \"timeout /t 5 /nobreak >nul & rundll32.exe powrprof.dll,SetSuspendState 0,0,0\"");
+                return CommandResult.Ok("El ordenador se suspenderá en cinco segundos.");
             case "system.shutdown":
-                StartSystemProcess("shutdown.exe", "/s /t 0");
-                break;
+                StartSystemProcess("shutdown.exe", "/s /t 5");
+                return CommandResult.Ok("El ordenador se apagará en cinco segundos.");
             case "system.restart":
-                StartSystemProcess("shutdown.exe", "/r /t 0");
-                break;
+                StartSystemProcess("shutdown.exe", "/r /t 5");
+                return CommandResult.Ok("El ordenador se reiniciará en cinco segundos.");
             default:
                 return CommandResult.Fail($"Acción integrada desconocida: {action}");
         }
-
-        return CommandResult.Ok($"Acción ejecutada: {action}");
     }
 
     private static async Task<CommandResult> SetPlaybackStateAsync(bool play, CancellationToken cancellationToken)
@@ -161,11 +158,4 @@ public sealed class BuiltInActionService
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("powrprof.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetSuspendState(
-        [MarshalAs(UnmanagedType.Bool)] bool hibernate,
-        [MarshalAs(UnmanagedType.Bool)] bool forceCritical,
-        [MarshalAs(UnmanagedType.Bool)] bool disableWakeEvent);
 }

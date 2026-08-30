@@ -65,16 +65,16 @@ public sealed class AgentConnectionManager
         {
             return await session.ExecuteAsync(
                 command,
-                TimeSpan.FromSeconds(12),
+                TimeSpan.FromSeconds(5),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {
-            return new CommandApiResponse(false, "El PC no respondió a tiempo.");
+            return new CommandApiResponse(false, "El ordenador no respondió a tiempo.");
         }
         catch (Exception ex)
         {
-            return new CommandApiResponse(false, $"Error de comunicación con el PC: {ex.Message}");
+            return new CommandApiResponse(false, $"Error de comunicación con el ordenador: {ex.Message}");
         }
     }
 

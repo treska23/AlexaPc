@@ -87,7 +87,7 @@ app.MapPost("/api/commands", async (
     if (result is null)
     {
         return Results.Json(
-            new CommandApiResponse(false, "El PC no está conectado al relay."),
+            new CommandApiResponse(false, "El ordenador no está conectado al relay."),
             statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 

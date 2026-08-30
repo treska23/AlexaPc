@@ -1,68 +1,105 @@
 import { DurableObject } from "cloudflare:workers";
 
+const COMMAND_TIMEOUT_MS = 5000;
+const MAX_COMMAND_LENGTH = 120;
+
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
+    const requestId = crypto.randomUUID();
+    const startedAt = Date.now();
 
-    if (url.pathname === "/health" && request.method === "GET") {
-      const deviceId = url.searchParams.get("deviceId")?.trim();
-      if (!deviceId) {
-        return json({ status: "ok", service: "AlexaPc Cloud Relay" });
-      }
-
-      const stub = env.RELAY.getByName(deviceId);
-      return stub.fetch("https://relay.internal/health");
-    }
-
-    if (url.pathname === "/ws/agent") {
-      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-        return json({ message: "WebSocket requerido." }, 400);
-      }
-
-      const deviceId = url.searchParams.get("deviceId")?.trim() ?? "";
-      const token = url.searchParams.get("token") ?? "";
-
-      if (!deviceId || !secureEquals(token, env.DEVICE_TOKEN ?? "")) {
-        return json({ message: "No autorizado." }, 401);
-      }
-
-      const stub = env.RELAY.getByName(deviceId);
-      return stub.fetch(new Request("https://relay.internal/ws", {
-        method: "GET",
-        headers: request.headers
-      }));
-    }
-
-    if (url.pathname === "/api/commands" && request.method === "POST") {
-      const suppliedKey = request.headers.get("x-alexapc-api-key") ?? "";
-      if (!secureEquals(suppliedKey, env.RELAY_API_KEY ?? "")) {
-        return json({ success: false, message: "No autorizado." }, 401);
-      }
-
-      let payload;
-      try {
-        payload = await request.json();
-      } catch {
-        return json({ success: false, message: "JSON no válido." }, 400);
-      }
-
-      const deviceId = String(payload?.deviceId ?? "").trim();
-      const command = String(payload?.command ?? "").trim();
-      if (!deviceId || !command) {
-        return json({ success: false, message: "deviceId y command son obligatorios." }, 400);
-      }
-
-      const stub = env.RELAY.getByName(deviceId);
-      return stub.fetch("https://relay.internal/command", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ command })
+    try {
+      const response = await routeRequest(request, env);
+      log("info", "request_completed", {
+        requestId,
+        method: request.method,
+        path: new URL(request.url).pathname,
+        status: response.status,
+        durationMs: Date.now() - startedAt
       });
+      return response;
+    } catch (error) {
+      log("error", "request_failed", {
+        requestId,
+        method: request.method,
+        path: new URL(request.url).pathname,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return json({ success: false, message: "Error interno del relay." }, 500);
     }
-
-    return json({ message: "AlexaPc Cloud Relay" }, 200);
   }
 };
+
+async function routeRequest(request, env) {
+  const url = new URL(request.url);
+
+  if (url.pathname === "/health" && request.method === "GET") {
+    const deviceId = url.searchParams.get("deviceId")?.trim();
+    if (!deviceId) {
+      return json({ status: "ok", service: "AlexaPc Cloud Relay" });
+    }
+
+    const stub = env.RELAY.getByName(deviceId);
+    return stub.fetch("https://relay.internal/health");
+  }
+
+  if (url.pathname === "/ws/agent") {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return json({ message: "WebSocket requerido." }, 426);
+    }
+
+    const deviceId = url.searchParams.get("deviceId")?.trim() ?? "";
+    const token = url.searchParams.get("token") ?? "";
+
+    if (!deviceId || !await secureEquals(token, env.DEVICE_TOKEN ?? "")) {
+      return json({ message: "No autorizado." }, 401);
+    }
+
+    const stub = env.RELAY.getByName(deviceId);
+    return stub.fetch(new Request("https://relay.internal/ws", {
+      method: "GET",
+      headers: request.headers
+    }));
+  }
+
+  if (url.pathname === "/api/commands" && request.method === "POST") {
+    const suppliedKey = request.headers.get("x-alexapc-api-key") ?? "";
+    if (!await secureEquals(suppliedKey, env.RELAY_API_KEY ?? "")) {
+      return json({ success: false, message: "No autorizado." }, 401);
+    }
+
+    let payload;
+    try {
+      payload = await request.json();
+    } catch {
+      return json({ success: false, message: "JSON no válido." }, 400);
+    }
+
+    const deviceId = String(payload?.deviceId ?? "").trim();
+    const command = String(payload?.command ?? "").trim();
+    if (!deviceId || !command) {
+      return json({ success: false, message: "deviceId y command son obligatorios." }, 400);
+    }
+
+    if (command.length > MAX_COMMAND_LENGTH) {
+      return json({ success: false, message: "El comando es demasiado largo." }, 400);
+    }
+
+    const stub = env.RELAY.getByName(deviceId);
+    return stub.fetch("https://relay.internal/command", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ command })
+    });
+  }
+
+  if (url.pathname === "/" && request.method === "GET") {
+    return json({ message: "AlexaPc Cloud Relay" });
+  }
+
+  return json({ message: "Not found" }, 404);
+}
 
 export class AlexaPcRelay extends DurableObject {
   constructor(ctx, env) {
@@ -74,62 +111,87 @@ export class AlexaPcRelay extends DurableObject {
     const url = new URL(request.url);
 
     if (url.pathname === "/health") {
-      const connectedAgents = this.ctx
-        .getWebSockets("agent")
-        .filter(ws => ws.readyState === WebSocket.OPEN)
-        .length;
-
-      return json({ status: "ok", connectedAgents });
+      return json({
+        status: "ok",
+        connectedAgents: this.getConnectedAgents().length,
+        pendingCommands: this.pending.size
+      });
     }
 
     if (url.pathname === "/ws") {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-        return json({ message: "WebSocket requerido." }, 400);
+        return json({ message: "WebSocket requerido." }, 426);
       }
 
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       this.ctx.acceptWebSocket(server, ["agent"]);
+      server.serializeAttachment({
+        connectionId: crypto.randomUUID(),
+        connectedAt: Date.now()
+      });
 
+      // More than one copy of the desktop agent can legitimately overlap for a
+      // few seconds (startup, an update, another Windows session, etc.). Closing
+      // the previous socket here makes both clients reconnect and replace each
+      // other forever. Keep every healthy socket and route commands to the most
+      // recently connected one instead.
+      log("info", "agent_connected", {
+        connectedAgents: this.getConnectedAgents().length
+      });
       return new Response(null, { status: 101, webSocket: client });
     }
 
     if (url.pathname === "/command" && request.method === "POST") {
       const { command } = await request.json();
-      const sockets = this.ctx.getWebSockets("agent").filter(ws => ws.readyState === WebSocket.OPEN);
+      const socket = this.getPrimaryAgent();
 
-      if (sockets.length === 0) {
-        return json({ success: false, message: "El PC no está conectado al relay." }, 503);
+      if (!socket) {
+        return json({ success: false, message: "El ordenador no está conectado al relay." }, 503);
       }
 
       const requestId = crypto.randomUUID();
       const responsePromise = new Promise(resolve => {
         const timeout = setTimeout(() => {
-          this.pending.delete(requestId);
-          resolve({ success: false, message: "El PC no respondió a tiempo." });
-        }, 10000);
+          this.completePending(requestId, {
+            success: false,
+            message: "El ordenador no respondió a tiempo.",
+            status: 504
+          });
+        }, COMMAND_TIMEOUT_MS);
 
-        this.pending.set(requestId, value => {
-          clearTimeout(timeout);
-          resolve(value);
-        });
+        this.pending.set(requestId, { socket, timeout, resolve });
       });
 
       try {
-        sockets[0].send(JSON.stringify({ type: "execute", requestId, command }));
-      } catch {
-        this.pending.delete(requestId);
-        return json({ success: false, message: "No se pudo enviar la orden al PC." }, 503);
+        socket.send(JSON.stringify({ type: "execute", requestId, command }));
+      } catch (error) {
+        this.completePending(requestId, {
+          success: false,
+          message: "No se pudo enviar la orden al ordenador.",
+          status: 503
+        });
+        log("error", "command_send_failed", {
+          requestId,
+          error: error instanceof Error ? error.message : String(error)
+        });
       }
 
       const result = await responsePromise;
-      return json(result, result.success ? 200 : 503);
+      const { status, ...payload } = result;
+      log(payload.success ? "info" : "error", "command_completed", {
+        requestId,
+        command,
+        success: payload.success,
+        status
+      });
+      return json(payload, status);
     }
 
     return json({ message: "Not found" }, 404);
   }
 
-  webSocketMessage(_socket, message) {
+  webSocketMessage(socket, message) {
     if (typeof message !== "string") {
       return;
     }
@@ -145,26 +207,71 @@ export class AlexaPcRelay extends DurableObject {
       return;
     }
 
-    const complete = this.pending.get(payload.requestId);
-    if (!complete) {
+    const pending = this.pending.get(payload.requestId);
+    if (!pending || pending.socket !== socket) {
       return;
     }
 
-    this.pending.delete(payload.requestId);
-    complete({
+    this.completePending(payload.requestId, {
       success: payload.success === true,
-      message: payload.message ?? (payload.success ? "Hecho." : "No se pudo ejecutar la orden.")
+      message: payload.message ?? (payload.success ? "Hecho." : "No se pudo ejecutar la orden."),
+      status: 200
     });
   }
 
-  webSocketClose(socket, code, reason) {
-    try {
-      socket.close(code, reason);
-    } catch {
-    }
+  webSocketClose(socket, code, reason, wasClean) {
+    this.failPendingForSocket(socket, "El ordenador se desconectó durante la orden.");
+    log("info", "agent_disconnected", {
+      code,
+      reason,
+      wasClean,
+      connectedAgents: this.getConnectedAgents().length
+    });
   }
 
-  webSocketError() {
+  webSocketError(socket, error) {
+    this.failPendingForSocket(socket, "Se perdió la conexión con el ordenador.");
+    log("error", "agent_websocket_error", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
+  getConnectedAgents() {
+    return this.ctx
+      .getWebSockets("agent")
+      .filter(socket => socket.readyState === WebSocket.OPEN);
+  }
+
+  getPrimaryAgent() {
+    return this.getConnectedAgents()
+      .sort((left, right) => connectionTime(right) - connectionTime(left))[0] ?? null;
+  }
+
+  completePending(requestId, result) {
+    const pending = this.pending.get(requestId);
+    if (!pending) {
+      return;
+    }
+
+    this.pending.delete(requestId);
+    clearTimeout(pending.timeout);
+    pending.resolve(result);
+  }
+
+  failPendingForSocket(socket, message) {
+    for (const [requestId, pending] of this.pending) {
+      if (pending.socket === socket) {
+        this.completePending(requestId, { success: false, message, status: 503 });
+      }
+    }
+  }
+}
+
+function connectionTime(socket) {
+  try {
+    return Number(socket.deserializeAttachment()?.connectedAt ?? 0);
+  } catch {
+    return 0;
   }
 }
 
@@ -175,14 +282,26 @@ function json(payload, status = 200) {
   });
 }
 
-function secureEquals(left, right) {
-  if (!left || !right || left.length !== right.length) {
-    return false;
-  }
+async function secureEquals(left, right) {
+  const encoder = new TextEncoder();
+  const [leftHash, rightHash] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(left)),
+    crypto.subtle.digest("SHA-256", encoder.encode(right))
+  ]);
+  return crypto.subtle.timingSafeEqual(leftHash, rightHash) && Boolean(left) && Boolean(right);
+}
 
-  let diff = 0;
-  for (let i = 0; i < left.length; i++) {
-    diff |= left.charCodeAt(i) ^ right.charCodeAt(i);
+function log(level, eventName, details = {}) {
+  const entry = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    level,
+    eventName,
+    ...details
+  });
+
+  if (level === "error") {
+    console.error(entry);
+  } else {
+    console.log(entry);
   }
-  return diff === 0;
 }

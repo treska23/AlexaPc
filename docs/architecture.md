@@ -22,7 +22,7 @@ Windows
 
 El agente de Windows no debe depender de la implementación concreta de Alexa. El `CommandDispatcher` recibe un nombre de comando y lo ejecuta. Hoy puede invocarlo la interfaz local; mañana lo invocará un mensaje WebSocket sin cambiar la lógica que controla Windows.
 
-El PC iniciará la conexión saliente al relay. No será necesario exponer un puerto del equipo a Internet.
+El ordenador iniciará la conexión saliente al relay. No será necesario exponer un puerto del equipo a Internet.
 
 ## Mensaje remoto propuesto
 

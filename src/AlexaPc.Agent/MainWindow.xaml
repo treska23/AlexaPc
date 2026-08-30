@@ -36,7 +36,7 @@
                     <Border Background="#163D31" CornerRadius="8" Padding="12,8" Margin="0,0,10,0">
                         <StackPanel Orientation="Horizontal">
                             <Ellipse Width="8" Height="8" Fill="{StaticResource SuccessBrush}" Margin="0,0,7,0" />
-                            <TextBlock Text="PC LOCAL · LISTO" Foreground="White" FontSize="12" FontWeight="SemiBold" />
+                            <TextBlock Text="ORDENADOR LOCAL · LISTO" Foreground="White" FontSize="12" FontWeight="SemiBold" />
                         </StackPanel>
                     </Border>
 
@@ -96,7 +96,7 @@
                     </Border>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock Text="Conexión remota" FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
-                        <TextBlock Text="AlexaPc intenta conectar al relay configurado en relay.json. Cuando marque CONECTADO, el PC ya puede recibir órdenes remotas." Foreground="#705027" FontSize="12" Margin="0,2,0,0" TextWrapping="Wrap" />
+                        <TextBlock Text="AlexaPc intenta conectar al relay configurado en relay.json. Cuando marque CONECTADO, el ordenador ya puede recibir órdenes remotas." Foreground="#705027" FontSize="12" Margin="0,2,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -125,7 +125,7 @@
                         </Grid.ColumnDefinitions>
 
                         <StackPanel>
-                            <TextBlock Text="Comandos del PC" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
+                            <TextBlock Text="Comandos del ordenador" FontSize="20" FontWeight="SemiBold" Foreground="{StaticResource AmazonNavyBrush}" />
                             <TextBlock Text="Solo se ejecutan comandos definidos aquí: Alexa nunca enviará código arbitrario al equipo." Foreground="{StaticResource MutedTextBrush}" FontSize="12" Margin="0,3,0,0" />
                         </StackPanel>
 

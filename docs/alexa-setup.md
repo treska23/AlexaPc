@@ -35,13 +35,13 @@ Al terminar, el script muestra una URL estable similar a:
 https://alexapc-relay.<tu-subdominio>.workers.dev
 ```
 
-y configura el PC con:
+y configura el ordenador con:
 
 ```text
 wss://alexapc-relay.<tu-subdominio>.workers.dev/ws/agent
 ```
 
-La configuración privada necesaria para la Skill queda solamente en este PC:
+La configuración privada necesaria para la Skill queda solamente en este ordenador:
 
 ```text
 %LOCALAPPDATA%\AlexaPc\cloud-relay.json

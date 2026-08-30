@@ -168,7 +168,7 @@ public sealed class CommandConfigurationService
         new()
         {
             Name = "suspende ordenador",
-            Description = "Suspende el PC.",
+            Description = "Suspende el ordenador.",
             Type = CommandType.BuiltIn,
             Target = "system.sleep"
         },

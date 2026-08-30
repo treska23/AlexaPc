@@ -13,6 +13,7 @@
         },
         {
           "name": "MediaPlayIntent",
+          "slots": [],
           "samples": [
             "reproduce",
             "reproducir",
@@ -22,8 +23,7 @@
             "inicie la reproducción",
             "pon la reproducción",
             "ponga la reproducción"
-          ],
-          "slots": []
+          ]
         },
         {
           "name": "ExecuteCommandIntent",
@@ -55,6 +55,50 @@
           ]
         },
         {
+          "name": "ShutdownComputerIntent",
+          "slots": [],
+          "samples": [
+            "apaga el ordenador",
+            "apaga ordenador",
+            "apagar el ordenador",
+            "apagar ordenador",
+            "apague el ordenador"
+          ]
+        },
+        {
+          "name": "RestartComputerIntent",
+          "slots": [],
+          "samples": [
+            "reinicia el ordenador",
+            "reinicia ordenador",
+            "reiniciar el ordenador",
+            "reiniciar ordenador",
+            "reinicie el ordenador"
+          ]
+        },
+        {
+          "name": "SleepComputerIntent",
+          "slots": [],
+          "samples": [
+            "suspende el ordenador",
+            "suspende ordenador",
+            "suspender el ordenador",
+            "suspender ordenador",
+            "suspenda el ordenador"
+          ]
+        },
+        {
+          "name": "LockComputerIntent",
+          "slots": [],
+          "samples": [
+            "bloquea el ordenador",
+            "bloquea ordenador",
+            "bloquear el ordenador",
+            "bloquear ordenador",
+            "bloquee el ordenador"
+          ]
+        },
+        {
           "name": "AMAZON.HelpIntent",
           "samples": []
         },
@@ -68,6 +112,10 @@
         },
         {
           "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
           "samples": []
         }
       ],

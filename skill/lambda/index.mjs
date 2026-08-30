@@ -1,17 +1,23 @@
 const relayUrl = (process.env.RELAY_URL ?? "").replace(/\/+$/, "");
 const apiKey = process.env.RELAY_API_KEY ?? "";
 const deviceId = process.env.DEVICE_ID ?? "pc-principal";
+const requestTimeoutMs = 6500;
 
 export const handler = async (event) => {
   const request = event?.request ?? {};
   logRequest(request);
 
   if (request.type === "LaunchRequest") {
-    return ask("Bardo Control listo. ¿Qué quieres que haga?", "Puedes decir, por ejemplo, abre YouTube.");
+    return ask("Bardo Control listo. ¿Qué quieres que haga?", "Puedes decir, por ejemplo, abre YouTube, pausa o apaga el ordenador.");
   }
 
   if (request.type === "IntentRequest") {
     const intentName = request.intent?.name;
+
+    const fixedCommand = commandForIntent(intentName);
+    if (fixedCommand) {
+      return executeAndRespond(fixedCommand);
+    }
 
     if (intentName === "ExecuteCommandIntent") {
       const rawCommand = getCommandSlotValue(request);
@@ -20,13 +26,12 @@ export const handler = async (event) => {
       }
 
       const command = normalizeCommand(rawCommand);
-      const result = await executeRemoteCommand(command);
-      return speak(result.success ? "Hecho." : result.message);
+      return executeAndRespond(command);
     }
 
     if (intentName === "AMAZON.HelpIntent") {
       return ask(
-        "Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube o pausa.",
+        "Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube, pausa, reanuda o apaga el ordenador.",
         "¿Qué quieres que haga?"
       );
     }
@@ -36,7 +41,7 @@ export const handler = async (event) => {
     }
 
     if (intentName === "AMAZON.FallbackIntent") {
-      return ask("No he reconocido esa orden de Bardo Control.", "Prueba con abre YouTube.");
+      return ask("No he reconocido esa orden de Bardo Control.", "Prueba con abre YouTube, pausa o apaga el ordenador.");
     }
   }
 
@@ -44,7 +49,7 @@ export const handler = async (event) => {
     return { version: "1.0", response: {} };
   }
 
-  return ask("¿Qué quieres que haga en el PC?", "Puedes decir abre YouTube.");
+  return ask("¿Qué quieres que haga en el ordenador?", "Puedes decir abre YouTube.");
 };
 
 function getCommandSlotValue(request) {
@@ -82,10 +87,55 @@ export function normalizeCommand(value) {
     "apaga el ordenador": "apaga ordenador",
     "apaga el pc": "apaga ordenador",
     "reinicia el ordenador": "reinicia ordenador",
-    "reinicia el pc": "reinicia ordenador"
+    "reinicia el pc": "reinicia ordenador",
+    "reanuda": "reproduce",
+    "reanude": "reproduce",
+    "reanuda la reproducción": "reproduce",
+    "reanuda la reproduccion": "reproduce",
+    "reanudar la reproducción": "reproduce",
+    "reanudar la reproduccion": "reproduce",
+    "continúa": "reproduce",
+    "continua": "reproduce",
+    "continúe": "reproduce",
+    "continue": "reproduce",
+    "continúa la reproducción": "reproduce",
+    "continua la reproduccion": "reproduce",
+    "reproducir": "reproduce",
+    "empieza a reproducir": "reproduce",
+    "empiece a reproducir": "reproduce",
+    "inicia la reproducción": "reproduce",
+    "inicia la reproduccion": "reproduce",
+    "pausa la reproducción": "pausa",
+    "pausa la reproduccion": "pausa",
+    "pausar": "pausa",
+    "pon pausa": "pausa"
   };
 
   return aliases[normalized] ?? normalized;
+}
+
+export function commandForIntent(intentName) {
+  const commands = {
+    "AMAZON.PauseIntent": "pausa",
+    "AMAZON.ResumeIntent": "reproduce",
+    MediaPauseIntent: "pausa",
+    MediaPlayIntent: "reproduce",
+    ShutdownComputerIntent: "apaga ordenador",
+    RestartComputerIntent: "reinicia ordenador",
+    SleepComputerIntent: "suspende ordenador",
+    LockComputerIntent: "bloquea ordenador"
+  };
+
+  return commands[intentName] ?? null;
+}
+
+async function executeAndRespond(command) {
+  const result = await executeRemoteCommand(command);
+  if (!result.success) {
+    return speak(result.message);
+  }
+
+  return speak(command.endsWith("ordenador") ? result.message : "Hecho.");
 }
 
 async function executeRemoteCommand(command) {
@@ -96,6 +146,9 @@ async function executeRemoteCommand(command) {
     };
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+
   try {
     const response = await fetch(`${relayUrl}/api/commands`, {
       method: "POST",
@@ -103,7 +156,8 @@ async function executeRemoteCommand(command) {
         "content-type": "application/json",
         "x-alexapc-api-key": apiKey
       },
-      body: JSON.stringify({ deviceId, command })
+      body: JSON.stringify({ deviceId, command }),
+      signal: controller.signal
     });
 
     const payload = await response.json().catch(() => ({}));
@@ -111,7 +165,7 @@ async function executeRemoteCommand(command) {
     if (!response.ok) {
       return {
         success: false,
-        message: payload.message ?? "No he podido comunicarme con el PC."
+        message: payload.message ?? "No he podido comunicarme con el ordenador."
       };
     }
 
@@ -122,8 +176,10 @@ async function executeRemoteCommand(command) {
   } catch {
     return {
       success: false,
-      message: "No he podido conectar con el servicio del PC."
+      message: "No he podido conectar con el servicio del ordenador."
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

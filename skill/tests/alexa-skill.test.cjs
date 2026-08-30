@@ -87,6 +87,15 @@ test('interaction model supports the documented Spanish one-shot action', () => 
   assert.ok(intent.samples.includes('abre {command}'));
   assert.equal(intent.samples.includes('que abra {command}'), false);
 
+  const fixedIntents = new Map(languageModel.intents.map(item => [item.name, item]));
+  assert.ok(fixedIntents.has('AMAZON.PauseIntent'));
+  assert.ok(fixedIntents.has('AMAZON.ResumeIntent'));
+  assert.ok(fixedIntents.get('MediaPlayIntent').samples.includes('reproduce'));
+  assert.ok(fixedIntents.get('ShutdownComputerIntent').samples.includes('apaga el ordenador'));
+  assert.ok(fixedIntents.get('RestartComputerIntent').samples.includes('reinicia el ordenador'));
+  assert.ok(fixedIntents.get('SleepComputerIntent').samples.includes('suspende el ordenador'));
+  assert.ok(fixedIntents.get('LockComputerIntent').samples.includes('bloquea el ordenador'));
+
   for (const sample of intent.samples) {
     assert.notEqual(sample.trim(), '{command}', 'AMAZON.SearchQuery needs a carrier phrase');
   }
@@ -98,7 +107,12 @@ test('normalization keeps command aliases compatible with commands.json', () => 
   assert.equal(exports._test.normalizeCommand('  You   Tube '), 'youtube');
   assert.equal(exports._test.normalizeCommand('EL BLOC DE NOTAS'), 'bloc de notas');
   assert.equal(exports._test.normalizeCommand('Reinicia el PC'), 'reinicia ordenador');
+  assert.equal(exports._test.normalizeCommand('Reanuda la reproducción'), 'reproduce');
+  assert.equal(exports._test.normalizeCommand('Pon pausa'), 'pausa');
   assert.equal(exports._test.normalizeCommand('mi comando personalizado'), 'mi comando personalizado');
+  assert.equal(exports._test.commandForIntent('ShutdownComputerIntent'), 'apaga ordenador');
+  assert.equal(exports._test.commandForIntent('AMAZON.PauseIntent'), 'pausa');
+  assert.equal(exports._test.commandForIntent('AMAZON.HelpIntent'), null);
 });
 
 test('environment-based Lambda keeps the same normalization behavior', async () => {
@@ -107,6 +121,7 @@ test('environment-based Lambda keeps the same normalization behavior', async () 
   assert.equal(lambda.normalizeCommand('  You   Tube '), 'youtube');
   assert.equal(lambda.normalizeCommand('Apaga el PC'), 'apaga ordenador');
   assert.equal(lambda.normalizeCommand('mi comando personalizado'), 'mi comando personalizado');
+  assert.equal(lambda.commandForIntent('SleepComputerIntent'), 'suspende ordenador');
 });
 
 test('LaunchRequest is logged without configuration or secrets', async () => {
@@ -152,6 +167,25 @@ test('IntentRequest logs the intent and received command slot', async () => {
   assert.equal(logs[0].requestType, 'IntentRequest');
   assert.equal(logs[0].intentName, 'ExecuteCommandIntent');
   assert.equal(logs[0].command, 'YouTube');
+});
+
+test('fixed computer intents do not depend on the open search slot', async () => {
+  const { exports, logs } = loadAlexaHostedTemplate();
+  const response = await exports.handler({
+    request: {
+      type: 'IntentRequest',
+      requestId: 'request-shutdown',
+      locale: 'es-ES',
+      intent: {
+        name: 'ShutdownComputerIntent',
+        slots: {}
+      }
+    }
+  });
+
+  assert.match(response.response.outputSpeech.text, /ordenador/);
+  assert.doesNotMatch(response.response.outputSpeech.text, /\bPC\b/i);
+  assert.equal(logs[0].intentName, 'ShutdownComputerIntent');
 });
 
 test('skill sources and preparation script are strict UTF-8 without mojibake', () => {
