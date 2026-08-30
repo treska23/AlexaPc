@@ -51,7 +51,21 @@
             "hacer {command}",
             "lanza {command}",
             "lance {command}",
-            "lanzar {command}"
+            "lanzar {command}",
+            "quiero {command}",
+            "necesito {command}",
+            "puedes {command}",
+            "podrías {command}",
+            "podrias {command}",
+            "ayúdame con {command}",
+            "ayudame con {command}",
+            "dime {command}",
+            "me diga {command}",
+            "explícame {command}",
+            "explicame {command}",
+            "me explique {command}",
+            "busca {command}",
+            "averigua {command}"
           ]
         },
         {
