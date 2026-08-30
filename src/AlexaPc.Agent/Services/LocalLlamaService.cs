@@ -1,3 +1,4 @@
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using AlexaPc.Agent.Models;
@@ -14,6 +15,7 @@ public sealed class LocalLlamaService
     private readonly HttpClient _httpClient = new();
     private readonly AssistantConfigurationService _configurationService;
     private readonly AppLogService _log;
+    private ResolvedBackend? _cachedBackend;
 
     public LocalLlamaService(
         AssistantConfigurationService configurationService,
@@ -57,6 +59,11 @@ public sealed class LocalLlamaService
         {
             throw new TimeoutException("Llama local ha tardado demasiado en responder.");
         }
+        catch (HttpRequestException)
+        {
+            _cachedBackend = null;
+            throw;
+        }
 
         var decision = ParseDecision(responseText, commands);
         _log.Info("local_assistant_decision", new
@@ -74,6 +81,11 @@ public sealed class LocalLlamaService
         AssistantSettings settings,
         CancellationToken cancellationToken)
     {
+        if (_cachedBackend is not null)
+        {
+            return _cachedBackend;
+        }
+
         var provider = (settings.Provider ?? "auto").Trim().ToLowerInvariant();
         var candidates = new List<(string Provider, string BaseUrl)>();
 
@@ -115,7 +127,8 @@ public sealed class LocalLlamaService
 
             if (!string.IsNullOrWhiteSpace(model))
             {
-                return new ResolvedBackend(candidate.Provider, candidate.BaseUrl, model);
+                _cachedBackend = new ResolvedBackend(candidate.Provider, candidate.BaseUrl, model);
+                return _cachedBackend;
             }
         }
 
