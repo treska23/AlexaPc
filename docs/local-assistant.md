@@ -94,7 +94,34 @@ dime qué es un agujero negro
 
 ## Restricción de latencia
 
-Alexa espera respuestas muy rápidas. El tiempo de inferencia local se limita por defecto a 5 segundos y las respuestas del modelo se mantienen cortas. Para una experiencia fluida conviene tener el modelo ya cargado en memoria antes de usar Bardo por voz.
+Alexa espera respuestas muy rápidas. Los límites están anidados para que cada capa pueda devolver un error útil antes de que expire la siguiente:
+
+```text
+inferencia y cola local:  máximo 5.000 ms
+Cloudflare Worker:        máximo 6.200 ms
+Lambda de Alexa:          máximo 7.200 ms
+presupuesto de Alexa:     menos de 8.000 ms
+```
+
+El agente precarga el modelo de Ollama al iniciar, conserva en caché el backend resuelto y pide a Ollama que mantenga el modelo cargado durante 24 horas. En modelos con razonamiento, como Qwen, se usa `think: false`: Bardo necesita una decisión JSON breve, no una cadena de razonamiento que consuma el presupuesto sin producir respuesta.
+
+Si una carga fría supera los 5 segundos, el agente devuelve un error controlado al relay y lanza una única precarga de recuperación en segundo plano. Los comandos exactos no pasan por Llama y siguen disponibles durante esa precarga.
+
+Los eventos detallados se escriben en `%LOCALAPPDATA%\AlexaPc\logs`: recepción, ruta exacta o natural, detección/caché del backend, inferencia, herramienta, resultado y envío WebSocket.
+
+## Pruebas
+
+```powershell
+dotnet build AlexaPc.sln --configuration Release
+node --test skill/tests/alexa-skill.test.cjs
+Push-Location cloudflare/worker
+npm ci
+npm test
+npx wrangler deploy --dry-run --outdir dist
+Pop-Location
+```
+
+Las pruebas del Worker levantan Workerd localmente y cubren autenticación, `/health`, orden exacta, órdenes concurrentes, respuesta natural y limpieza de una petición que agota su timeout.
 
 ## Próximas herramientas
 

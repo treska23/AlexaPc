@@ -24,13 +24,13 @@ El agente de Windows no debe depender de la implementación concreta de Alexa. E
 
 El ordenador iniciará la conexión saliente al relay. No será necesario exponer un puerto del equipo a Internet.
 
-## Mensaje remoto propuesto
+## Mensaje remoto
 
 ```json
 {
-  "id": "f4d4f631-5897-47b4-953a-3d4ad5d759dc",
-  "command": "pausa",
-  "sentAtUtc": "2026-08-29T16:00:00Z"
+  "type": "execute",
+  "requestId": "f4d4f631-5897-47b4-953a-3d4ad5d759dc",
+  "command": "pausa"
 }
 ```
 
@@ -38,11 +38,16 @@ Respuesta:
 
 ```json
 {
-  "id": "f4d4f631-5897-47b4-953a-3d4ad5d759dc",
+  "type": "result",
+  "requestId": "f4d4f631-5897-47b4-953a-3d4ad5d759dc",
   "success": true,
-  "message": "Acción ejecutada: media.playPause"
+  "message": "Reproducción pausada."
 }
 ```
+
+El Worker mantiene una entrada pendiente por `requestId`. El agente procesa mensajes en tareas independientes y serializa únicamente los envíos WebSocket, de modo que un comando exacto no queda bloqueado por una inferencia local. Las inferencias sí se serializan para no competir por GPU; su espera forma parte del límite local de 5 segundos.
+
+Cada petición termina en un mensaje `result`, incluso cuando la ejecución devuelve error, se cancela o lanza una excepción. Si el socket se pierde o no llega ningún resultado, el Durable Object completa y limpia la petición pendiente con un error controlado.
 
 ## Seguridad prevista
 

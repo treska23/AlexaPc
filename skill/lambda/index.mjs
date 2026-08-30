@@ -1,7 +1,7 @@
 const relayUrl = (process.env.RELAY_URL ?? "").replace(/\/+$/, "");
 const apiKey = process.env.RELAY_API_KEY ?? "";
 const deviceId = process.env.DEVICE_ID ?? "pc-principal";
-const requestTimeoutMs = 6500;
+export const requestTimeoutMs = 7200;
 const assistantPrefix = "[bardo]";
 
 export const handler = async (event) => {
@@ -166,6 +166,7 @@ async function executeRemoteCommand(command) {
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const startedAt = Date.now();
 
   try {
     const response = await fetch(`${relayUrl}/api/commands`, {
@@ -179,6 +180,7 @@ async function executeRemoteCommand(command) {
     });
 
     const payload = await response.json().catch(() => ({}));
+    logRelayResult(command, response.status, response.ok && payload.success === true, Date.now() - startedAt);
 
     if (!response.ok) {
       return {
@@ -191,7 +193,14 @@ async function executeRemoteCommand(command) {
       success: payload.success === true,
       message: payload.message ?? "No se pudo ejecutar la orden."
     };
-  } catch {
+  } catch (error) {
+    logRelayResult(
+      command,
+      null,
+      false,
+      Date.now() - startedAt,
+      error?.name === "AbortError" ? "timeout" : "network_error"
+    );
     return {
       success: false,
       message: "No he podido conectar con el servicio del ordenador."
@@ -199,6 +208,18 @@ async function executeRemoteCommand(command) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function logRelayResult(command, status, success, durationMs, error = null) {
+  console.info(JSON.stringify({
+    component: "AlexaPc.Skill",
+    event: "relay_result",
+    command,
+    status,
+    success,
+    durationMs,
+    error
+  }));
 }
 
 function speak(text) {

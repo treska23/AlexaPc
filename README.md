@@ -39,10 +39,12 @@ Componentes:
 - Lambda puente entre Alexa y el relay.
 - Interpretación de lenguaje natural mediante Llama local.
 - Detección automática de Ollama, LM Studio y llama.cpp.
+- Precarga de Ollama, caché del backend y modelo residente para evitar latencia fría.
 - Respuestas breves de Llama leídas por Alexa.
 - Selección de hasta cuatro herramientas autorizadas para peticiones compuestas.
 - Rechazo de herramientas inventadas y protección adicional para acciones de energía.
 - Build automática con GitHub Actions.
+- Pruebas de integración del Worker con WebSocket, Durable Objects, concurrencia y timeout.
 
 ## Ejecutar el agente
 

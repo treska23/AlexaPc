@@ -3,7 +3,7 @@ const https = require('https');
 const RELAY_URL = __RELAY_URL_JSON__;
 const RELAY_API_KEY = __RELAY_API_KEY_JSON__;
 const DEVICE_ID = __DEVICE_ID_JSON__;
-const REQUEST_TIMEOUT_MS = 6500;
+const REQUEST_TIMEOUT_MS = 7200;
 const ASSISTANT_PREFIX = '[bardo]';
 
 exports.handler = async (event) => {
@@ -160,6 +160,16 @@ function extractAssistantMessage(message) {
 
 function executeRemoteCommand(command) {
   return new Promise((resolve) => {
+    const startedAt = Date.now();
+    let relayResultLogged = false;
+    const logResult = (status, success, error = null) => {
+      if (relayResultLogged) {
+        return;
+      }
+
+      relayResultLogged = true;
+      logRelayResult(command, status, success, Date.now() - startedAt, error);
+    };
     let endpoint;
     try {
       endpoint = new URL('/api/commands', RELAY_URL);
@@ -190,6 +200,7 @@ function executeRemoteCommand(command) {
         try { payload = JSON.parse(data); } catch {}
 
         if (res.statusCode >= 200 && res.statusCode < 300) {
+          logResult(res.statusCode, payload.success === true);
           resolve({
             success: payload.success === true,
             message: payload.message ?? 'No se pudo ejecutar la orden.'
@@ -197,6 +208,7 @@ function executeRemoteCommand(command) {
           return;
         }
 
+        logResult(res.statusCode, false);
         resolve({
           success: false,
           message: payload.message ?? 'No he podido comunicarme con el ordenador.'
@@ -205,16 +217,30 @@ function executeRemoteCommand(command) {
     });
 
     req.on('timeout', () => {
+      logResult(null, false, 'timeout');
       req.destroy(new Error('timeout'));
     });
 
     req.on('error', () => {
+      logResult(null, false, 'network_error');
       resolve({ success: false, message: 'No he podido conectar con el servicio del ordenador.' });
     });
 
     req.write(body);
     req.end();
   });
+}
+
+function logRelayResult(command, status, success, durationMs, error = null) {
+  console.info(JSON.stringify({
+    component: 'AlexaPc.Skill',
+    event: 'relay_result',
+    command,
+    status,
+    success,
+    durationMs,
+    error
+  }));
 }
 
 function speak(text) {
@@ -238,4 +264,9 @@ function ask(text, reprompt) {
   };
 }
 
-exports._test = { normalizeCommand, commandForIntent, extractAssistantMessage };
+exports._test = {
+  normalizeCommand,
+  commandForIntent,
+  extractAssistantMessage,
+  requestTimeoutMs: REQUEST_TIMEOUT_MS
+};

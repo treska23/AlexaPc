@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 
-const COMMAND_TIMEOUT_MS = 5000;
+const COMMAND_TIMEOUT_MS = 6200;
 const MAX_COMMAND_LENGTH = 120;
 
 export default {
@@ -9,7 +9,7 @@ export default {
     const startedAt = Date.now();
 
     try {
-      const response = await routeRequest(request, env);
+      const response = await routeRequest(request, env, requestId);
       log("info", "request_completed", {
         requestId,
         method: request.method,
@@ -31,7 +31,7 @@ export default {
   }
 };
 
-async function routeRequest(request, env) {
+async function routeRequest(request, env, edgeRequestId) {
   const url = new URL(request.url);
 
   if (url.pathname === "/health" && request.method === "GET") {
@@ -87,6 +87,10 @@ async function routeRequest(request, env) {
     }
 
     const stub = env.RELAY.getByName(deviceId);
+    log("info", "command_api_accepted", {
+      edgeRequestId,
+      command
+    });
     return stub.fetch("https://relay.internal/command", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -105,6 +109,7 @@ export class AlexaPcRelay extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.pending = new Map();
+    this.commandTimeoutMs = resolveCommandTimeout(env.COMMAND_TIMEOUT_MS);
   }
 
   async fetch(request) {
@@ -114,7 +119,8 @@ export class AlexaPcRelay extends DurableObject {
       return json({
         status: "ok",
         connectedAgents: this.getConnectedAgents().length,
-        pendingCommands: this.pending.size
+        pendingCommands: this.pending.size,
+        commandTimeoutMs: this.commandTimeoutMs
       });
     }
 
@@ -151,20 +157,34 @@ export class AlexaPcRelay extends DurableObject {
       }
 
       const requestId = crypto.randomUUID();
+      const startedAt = Date.now();
+      log("info", "command_received", {
+        requestId,
+        command,
+        connectedAgents: this.getConnectedAgents().length,
+        pendingCommands: this.pending.size
+      });
+
       const responsePromise = new Promise(resolve => {
         const timeout = setTimeout(() => {
+          log("error", "command_timed_out", {
+            requestId,
+            command,
+            durationMs: Date.now() - startedAt
+          });
           this.completePending(requestId, {
             success: false,
             message: "El ordenador no respondió a tiempo.",
             status: 504
           });
-        }, COMMAND_TIMEOUT_MS);
+        }, this.commandTimeoutMs);
 
         this.pending.set(requestId, { socket, timeout, resolve });
       });
 
       try {
         socket.send(JSON.stringify({ type: "execute", requestId, command }));
+        log("info", "command_dispatched", { requestId, command });
       } catch (error) {
         this.completePending(requestId, {
           success: false,
@@ -183,7 +203,8 @@ export class AlexaPcRelay extends DurableObject {
         requestId,
         command,
         success: payload.success,
-        status
+        status,
+        durationMs: Date.now() - startedAt
       });
       return json(payload, status);
     }
@@ -208,9 +229,26 @@ export class AlexaPcRelay extends DurableObject {
     }
 
     const pending = this.pending.get(payload.requestId);
-    if (!pending || pending.socket !== socket) {
+    if (!pending) {
+      log("error", "command_result_ignored", {
+        requestId: payload.requestId,
+        reason: "not_pending"
+      });
       return;
     }
+
+    if (pending.socket !== socket) {
+      log("error", "command_result_ignored", {
+        requestId: payload.requestId,
+        reason: "wrong_socket"
+      });
+      return;
+    }
+
+    log("info", "command_result_received", {
+      requestId: payload.requestId,
+      success: payload.success === true
+    });
 
     this.completePending(payload.requestId, {
       success: payload.success === true,
@@ -273,6 +311,15 @@ function connectionTime(socket) {
   } catch {
     return 0;
   }
+}
+
+function resolveCommandTimeout(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return COMMAND_TIMEOUT_MS;
+  }
+
+  return Math.min(COMMAND_TIMEOUT_MS, Math.max(50, Math.round(parsed)));
 }
 
 function json(payload, status = 200) {

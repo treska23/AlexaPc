@@ -10,6 +10,8 @@ const modelPath = path.join(repoRoot, 'skill', 'es-ES', 'interactionModel.json')
 const templatePath = path.join(repoRoot, 'skill', 'alexa-hosted', 'index.template.js');
 const lambdaModulePath = path.join(repoRoot, 'skill', 'lambda', 'index.mjs');
 const prepareScriptPath = path.join(repoRoot, 'scripts', 'Prepare-AlexaSkill.ps1');
+const workerPath = path.join(repoRoot, 'cloudflare', 'worker', 'src', 'index.js');
+const llamaServicePath = path.join(repoRoot, 'src', 'AlexaPc.Agent', 'Services', 'LocalLlamaService.cs');
 
 function readStrictUtf8(filePath) {
   const bytes = fs.readFileSync(filePath);
@@ -129,6 +131,32 @@ test('environment-based Lambda keeps the same normalization behavior', async () 
   assert.equal(lambda.normalizeCommand('mi comando personalizado'), 'mi comando personalizado');
   assert.equal(lambda.commandForIntent('SleepComputerIntent'), 'suspende ordenador');
   assert.equal(lambda.extractAssistantMessage('[bardo] Respuesta local.'), 'Respuesta local.');
+  assert.equal(lambda.requestTimeoutMs, 7200);
+});
+
+test('timeouts are nested inside the Alexa response budget', async () => {
+  const { exports } = loadAlexaHostedTemplate();
+  const workerSource = readStrictUtf8(workerPath);
+  const llamaSource = readStrictUtf8(llamaServicePath);
+  const workerTimeoutMs = Number(workerSource.match(/COMMAND_TIMEOUT_MS\s*=\s*(\d+)/)?.[1]);
+  const assistantTimeoutSeconds = Number(
+    llamaSource.match(/MaximumInferenceTimeoutSeconds\s*=\s*(\d+)/)?.[1]
+  );
+
+  assert.equal(assistantTimeoutSeconds, 5);
+  assert.equal(workerTimeoutMs, 6200);
+  assert.equal(exports._test.requestTimeoutMs, 7200);
+  assert.ok(assistantTimeoutSeconds * 1000 < workerTimeoutMs);
+  assert.ok(workerTimeoutMs < exports._test.requestTimeoutMs);
+  assert.ok(exports._test.requestTimeoutMs < 8000);
+});
+
+test('Ollama requests disable hidden thinking and keep the selected model warm', () => {
+  const source = readStrictUtf8(llamaServicePath);
+
+  assert.match(source, /think\s*=\s*false/);
+  assert.match(source, /OllamaKeepAlive\s*=\s*"24h"/);
+  assert.match(source, /WarmUpAsync/);
 });
 
 test('LaunchRequest is logged without configuration or secrets', async () => {
