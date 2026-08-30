@@ -4,13 +4,17 @@ const RELAY_URL = __RELAY_URL_JSON__;
 const RELAY_API_KEY = __RELAY_API_KEY_JSON__;
 const DEVICE_ID = __DEVICE_ID_JSON__;
 const REQUEST_TIMEOUT_MS = 6500;
+const ASSISTANT_PREFIX = '[bardo]';
 
 exports.handler = async (event) => {
   const request = event?.request ?? {};
   logRequest(request);
 
   if (request.type === 'LaunchRequest') {
-    return ask('Bardo Control listo. ¿Qué quieres que haga?', 'Puedes decir, por ejemplo, abre YouTube, pausa o apaga el ordenador.');
+    return ask(
+      'Bardo Control listo. ¿Qué quieres que haga?',
+      'Puedes darme una orden o pedirme algo con tus propias palabras.'
+    );
   }
 
   if (request.type === 'IntentRequest') {
@@ -24,7 +28,7 @@ exports.handler = async (event) => {
     if (intentName === 'ExecuteCommandIntent') {
       const rawCommand = getCommandSlotValue(request);
       if (!rawCommand) {
-        return ask('No he entendido el comando. ¿Qué quieres que haga?', 'Di, por ejemplo, abre YouTube.');
+        return ask('No he entendido la petición. ¿Qué quieres que haga?', 'Dímelo con tus propias palabras.');
       }
 
       const command = normalizeCommand(rawCommand);
@@ -33,7 +37,7 @@ exports.handler = async (event) => {
 
     if (intentName === 'AMAZON.HelpIntent') {
       return ask(
-        'Puedes pedirme que ejecute cualquiera de los comandos configurados en AlexaPc. Por ejemplo, abre YouTube, pausa, reanuda o apaga el ordenador.',
+        'Puedes darme órdenes del ordenador o hablarme de forma natural. Si no reconozco un comando directo, lo intentará entender el asistente local.',
         '¿Qué quieres que haga?'
       );
     }
@@ -43,7 +47,7 @@ exports.handler = async (event) => {
     }
 
     if (intentName === 'AMAZON.FallbackIntent') {
-      return ask('No he reconocido esa orden de Bardo Control.', 'Prueba con abre YouTube, pausa o apaga el ordenador.');
+      return ask('No he reconocido esa petición de Bardo Control.', 'Prueba a decir quiero, necesito, dime o abre, seguido de lo que quieras.');
     }
   }
 
@@ -51,7 +55,7 @@ exports.handler = async (event) => {
     return { version: '1.0', response: {} };
   }
 
-  return ask('¿Qué quieres que haga en el ordenador?', 'Puedes decir abre YouTube.');
+  return ask('¿Qué quieres que haga en el ordenador?', 'Puedes darme una orden o pedirme algo con tus propias palabras.');
 };
 
 function getCommandSlotValue(request) {
@@ -137,7 +141,21 @@ async function executeAndRespond(command) {
     return speak(result.message);
   }
 
+  const assistantMessage = extractAssistantMessage(result.message);
+  if (assistantMessage) {
+    return speak(assistantMessage);
+  }
+
   return speak(command.endsWith('ordenador') ? result.message : 'Hecho.');
+}
+
+function extractAssistantMessage(message) {
+  const text = String(message ?? '').trim();
+  if (!text.toLocaleLowerCase('es-ES').startsWith(ASSISTANT_PREFIX)) {
+    return null;
+  }
+
+  return text.slice(ASSISTANT_PREFIX.length).trim() || 'Hecho.';
 }
 
 function executeRemoteCommand(command) {
@@ -220,4 +238,4 @@ function ask(text, reprompt) {
   };
 }
 
-exports._test = { normalizeCommand, commandForIntent };
+exports._test = { normalizeCommand, commandForIntent, extractAssistantMessage };
