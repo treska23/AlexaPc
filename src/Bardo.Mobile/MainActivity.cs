@@ -2,6 +2,7 @@ using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.OS;
+using Android.Speech;
 using Android.Widget;
 using Bardo.Mobile.Infrastructure;
 
@@ -22,6 +23,7 @@ public sealed class MainActivity : Activity
     private EditText? _wakeWord;
     private EditText? _testCommand;
     private TextView? _status;
+    private bool _startAfterPermission;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
@@ -74,7 +76,7 @@ public sealed class MainActivity : Activity
         };
 
         var startButton = AddButton(content, "Empezar a escuchar");
-        startButton.Click += (_, _) => StartListening();
+        startButton.Click += async (_, _) => await StartListeningAsync();
 
         var stopButton = AddButton(content, "Parar escucha");
         stopButton.Click += (_, _) =>
@@ -86,32 +88,104 @@ public sealed class MainActivity : Activity
         var testButton = AddButton(content, "Enviar comando de prueba");
         testButton.Click += async (_, _) => await SendTestCommandAsync();
 
+        var diagnosticsButton = AddButton(content, "Diagnóstico de voz");
+        diagnosticsButton.Click += (_, _) => ShowVoiceDiagnostics();
+
         SetContentView(root);
         RequestRequiredPermissions();
     }
 
-    private void StartListening()
+    protected override void OnResume()
+    {
+        base.OnResume();
+
+        if (BardoVoiceService.IsRunning)
+        {
+            SetStatus(BardoVoiceService.CurrentStatus);
+        }
+    }
+
+    private async Task StartListeningAsync()
     {
         SaveSettings();
 
         if (CheckSelfPermission(Android.Manifest.Permission.RecordAudio) != Permission.Granted)
         {
+            _startAfterPermission = true;
             RequestRequiredPermissions();
-            SetStatus("falta permiso de micrófono");
+            SetStatus("esperando permiso de micrófono");
             return;
         }
 
-        var intent = new Intent(this, typeof(BardoVoiceService));
-        if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+        try
         {
-            StartForegroundService(intent);
+            SetStatus("arrancando servicio de voz…");
+            var intent = new Intent(this, typeof(BardoVoiceService));
+
+            if (Build.VERSION.SdkInt >= BuildVersionCodes.O)
+            {
+                StartForegroundService(intent);
+            }
+            else
+            {
+                StartService(intent);
+            }
+
+            await Task.Delay(900);
+
+            if (BardoVoiceService.IsRunning)
+            {
+                SetStatus(BardoVoiceService.CurrentStatus);
+            }
+            else
+            {
+                SetStatus("ERROR: Android no ha mantenido activo el servicio de voz");
+            }
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"ERROR AL ARRANCAR: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private void ShowVoiceDiagnostics()
+    {
+        var microphoneGranted =
+            CheckSelfPermission(Android.Manifest.Permission.RecordAudio) == Permission.Granted;
+        var standardAvailable = SpeechRecognizer.IsRecognitionAvailable(this);
+        var onDeviceAvailable =
+            Build.VERSION.SdkInt >= BuildVersionCodes.S &&
+            SpeechRecognizer.IsOnDeviceRecognitionAvailable(this);
+
+        var running = BardoVoiceService.IsRunning;
+        var serviceStatus = BardoVoiceService.CurrentStatus;
+
+        SetStatus(
+            $"Micro={microphoneGranted} · Voz sistema={standardAvailable} · Voz local={onDeviceAvailable} · Servicio={running} · {serviceStatus}");
+    }
+
+    public override void OnRequestPermissionsResult(
+        int requestCode,
+        string[] permissions,
+        Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode != PermissionRequestCode || !_startAfterPermission)
+        {
+            return;
+        }
+
+        _startAfterPermission = false;
+
+        if (CheckSelfPermission(Android.Manifest.Permission.RecordAudio) == Permission.Granted)
+        {
+            _ = StartListeningAsync();
         }
         else
         {
-            StartService(intent);
+            SetStatus("permiso de micrófono denegado");
         }
-
-        SetStatus($"esperando «{_wakeWord?.Text?.Trim()}»");
     }
 
     private async Task SendTestCommandAsync()
