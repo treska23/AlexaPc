@@ -33,12 +33,16 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
 
     public static bool IsRunning { get; private set; }
     public static string CurrentStatus { get; private set; } = "detenido";
+    public static float LastRmsDb { get; private set; } = float.NaN;
+    public static string LastRecognizerEvent { get; private set; } = "sin eventos";
 
     public override void OnCreate()
     {
         base.OnCreate();
         IsRunning = true;
         CurrentStatus = "iniciando servicio";
+        LastRmsDb = float.NaN;
+        LastRecognizerEvent = "iniciando";
 
         try
         {
@@ -60,15 +64,19 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
                 return;
             }
 
-            if (onDeviceAvailable)
-            {
-                _recognizer = SpeechRecognizer.CreateOnDeviceSpeechRecognizer(this);
-                _usingOnDeviceRecognizer = true;
-            }
-            else
+            // Para el MVP preferimos el reconocedor estándar del sistema. Algunos
+            // fabricantes anuncian reconocimiento local disponible aunque el modelo
+            // de español no esté realmente preparado y el reconocedor queda mudo.
+            // El motor local de wake word se añadirá después de validar el circuito.
+            if (standardAvailable)
             {
                 _recognizer = SpeechRecognizer.CreateSpeechRecognizer(this);
                 _usingOnDeviceRecognizer = false;
+            }
+            else
+            {
+                _recognizer = SpeechRecognizer.CreateOnDeviceSpeechRecognizer(this);
+                _usingOnDeviceRecognizer = true;
             }
 
             if (_recognizer is null)
@@ -85,6 +93,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         catch (Exception ex)
         {
             Log.Error(LogTag, $"OnCreate falló: {ex}");
+            LastRecognizerEvent = $"fallo: {ex.GetType().Name}";
             SetServiceStatus($"Fallo al iniciar: {ex.GetType().Name}: {ex.Message}");
             StopSelf();
         }
@@ -114,6 +123,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
     {
         IsRunning = false;
         CurrentStatus = "detenido";
+        LastRecognizerEvent = "servicio detenido";
         _destroyed = true;
         _shutdown.Cancel();
         _handler?.RemoveCallbacksAndMessages(null);
@@ -164,12 +174,14 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         try
         {
             _waitingForResult = true;
+            LastRecognizerEvent = "StartListening";
             _recognizer.StartListening(_recognizerIntent);
             Log.Debug(LogTag, "StartListening");
         }
         catch (Exception ex)
         {
             _waitingForResult = false;
+            LastRecognizerEvent = $"StartListening falló: {ex.GetType().Name}";
             Log.Warn(LogTag, $"StartListening falló: {ex}");
             SetServiceStatus($"Error iniciando micrófono: {ex.GetType().Name}");
             ScheduleListen(1200);
@@ -180,6 +192,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
     {
         _waitingForResult = false;
         var text = GetBestResult(results);
+        LastRecognizerEvent = $"resultado: {text ?? "<vacío>"}";
         Log.Info(LogTag, $"Resultado: {text ?? "<vacío>"}");
 
         if (string.IsNullOrWhiteSpace(text))
@@ -219,6 +232,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             return;
         }
 
+        LastRecognizerEvent = $"parcial: {text}";
         Log.Debug(LogTag, $"Parcial: {text}");
 
         if (_mode == ListeningMode.WakeWord && ContainsWakeWord(text))
@@ -236,6 +250,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             return;
         }
 
+        LastRecognizerEvent = $"error: {error}";
         Log.Warn(LogTag, $"SpeechRecognizer error: {error}");
 
         if (error is not SpeechRecognizerError.NoMatch and not SpeechRecognizerError.SpeechTimeout)
@@ -383,11 +398,31 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             .Build();
     }
 
-    public void OnReadyForSpeech(Bundle? @params) => Log.Debug(LogTag, "Micrófono listo");
-    public void OnBeginningOfSpeech() => Log.Debug(LogTag, "Inicio de voz");
-    public void OnRmsChanged(float rmsdB) { }
+    public void OnReadyForSpeech(Bundle? @params)
+    {
+        LastRecognizerEvent = "micrófono listo";
+        Log.Debug(LogTag, "Micrófono listo");
+    }
+
+    public void OnBeginningOfSpeech()
+    {
+        LastRecognizerEvent = "voz detectada";
+        Log.Debug(LogTag, "Inicio de voz");
+    }
+
+    public void OnRmsChanged(float rmsdB)
+    {
+        LastRmsDb = rmsdB;
+    }
+
     public void OnBufferReceived(byte[]? buffer) { }
-    public void OnEndOfSpeech() => Log.Debug(LogTag, "Fin de voz");
+
+    public void OnEndOfSpeech()
+    {
+        LastRecognizerEvent = "fin de voz";
+        Log.Debug(LogTag, "Fin de voz");
+    }
+
     public void OnEvent(int eventType, Bundle? @params) { }
     public void OnSegmentResults(Bundle segmentResults) { }
     public void OnEndOfSegmentedSession() { }
