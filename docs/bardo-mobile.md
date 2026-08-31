@@ -72,7 +72,7 @@ abre Chrome, busca vídeos de jazz en YouTube, coloca Chrome en la pantalla de l
 
 También controla aplicaciones y ventanas, distribución de pantallas, reproducción multimedia, volumen y consultas sobre lo que está abierto en el PC. Las acciones destructivas no se ejecutan por traducción libre.
 
-## Modo dedicado 0.2.1
+## Modo dedicado 0.2.3
 
 La aplicación incluye:
 
@@ -81,6 +81,8 @@ La aplicación incluye:
 - receptor de arranque del teléfono, que intenta iniciar directamente la voz y la interfaz;
 - actividad `HOME`, para poder sustituir el lanzador de Android;
 - funcionamiento de voz con la pantalla apagada, sin encenderla al reconocer `Bardo`;
+- confirmación sonora inmediata al reconocer `Bardo`, que indica cuándo decir la orden;
+- reconocimiento local del dispositivo para la palabra `Bardo` y reconocimiento general separado para la orden;
 - bloqueos de CPU y Wi-Fi mientras escucha;
 - servicio de voz permanente con notificación;
 - administración del dispositivo y modo quiosco preparados.
@@ -94,7 +96,7 @@ En el OPPO de desarrollo se ha aplicado además una configuración reversible:
 
 Esto hace que Bardo sustituya **en la práctica** a `OK Google` en el teléfono dedicado. No convierte todavía a Bardo en un servicio de hotword integrado en el DSP del fabricante: la versión actual mantiene ciclos de `SpeechRecognizer`. La siguiente mejora de consumo y latencia será un detector local específico de la palabra `Bardo`.
 
-La pantalla puede permanecer apagada. El servicio de primer plano reserva CPU y Wi-Fi y mantiene los ciclos del micrófono sin adquirir ningún bloqueo de pantalla. Al reconocer `Bardo`, abre una sesión nueva para la orden y la envía al PC sin iluminar el panel. Su canal de notificación no usa sonido, vibración ni luz. La fiabilidad absoluta después de reinicios o cierres forzosos del fabricante requiere el aprovisionamiento como propietario del dispositivo descrito a continuación.
+La pantalla puede permanecer apagada. El servicio de primer plano reserva CPU y Wi-Fi y mantiene los ciclos del micrófono sin adquirir ningún bloqueo de pantalla. Al reconocer `Bardo`, reproduce un tono corto, abre una sesión nueva para la orden y la envía al PC sin iluminar el panel. Si el reconocedor repite la palabra `Bardo` al principio de la orden, la aplicación la elimina antes de enviarla. Su canal de notificación no usa sonido, vibración ni luz. La fiabilidad absoluta después de reinicios o cierres forzosos del fabricante requiere el aprovisionamiento como propietario del dispositivo descrito a continuación.
 
 ## Bloqueo completo como dispositivo dedicado
 
@@ -127,7 +129,7 @@ El OPPO tendrá dos palabras de activación con la pantalla apagada:
 
 La implementación deberá usar un único coordinador del micrófono y de las palabras de activación. Ese coordinador entregará cada conversación al motor correspondiente, evitando que Bardo y Alexa intenten escuchar simultáneamente o se bloqueen entre sí. Cada ruta tendrá una confirmación sonora distinta para que se sepa qué asistente ha respondido sin encender la pantalla.
 
-Esta integración se hará después de validar Bardo 0.2.1 con la pantalla apagada. La vía concreta de Alexa —aplicación instalada o servicio de voz autorizado— se decidirá en esa fase sin alterar el recorrido estable de Bardo.
+Esta integración se hará después de validar Bardo 0.2.3 con la pantalla apagada. La vía concreta de Alexa —aplicación instalada o servicio de voz autorizado— se decidirá en esa fase sin alterar el recorrido estable de Bardo.
 
 ## Estado técnico
 

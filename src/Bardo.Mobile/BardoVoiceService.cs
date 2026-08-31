@@ -1,6 +1,7 @@
 using Android.App;
 using Android.Content;
 using Android.Content.PM;
+using Android.Media;
 using Android.Net;
 using Android.Net.Wifi;
 using Android.OS;
@@ -30,6 +31,7 @@ public sealed class BardoVoiceService : Service
     private Handler? _handler;
     private PowerManager.WakeLock? _cpuWakeLock;
     private WifiManager.WifiLock? _wifiLock;
+    private ToneGenerator? _feedbackTone;
     private SpeechRecognizer? _activeRecognizer;
     private SessionRecognitionListener? _activeListener;
     private Intent? _recognizerIntent;
@@ -83,7 +85,7 @@ public sealed class BardoVoiceService : Service
             }
 
             _recognizerIntent = BuildRecognizerIntent();
-            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
+            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabelFor(ListeningMode.WakeWord)}");
             ScheduleListen(300, "inicio del servicio");
         }
         catch (Exception ex)
@@ -108,7 +110,7 @@ public sealed class BardoVoiceService : Service
         {
             if (_mode == ListeningMode.WakeWord)
             {
-                SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
+                SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabelFor(ListeningMode.WakeWord)}");
             }
 
             ScheduleListen(150, "OnStartCommand sin sesión activa");
@@ -135,6 +137,7 @@ public sealed class BardoVoiceService : Service
         }
 
         _handler = null;
+        ReleaseFeedbackTone();
         ReleaseDedicatedResourceLocks();
         _recognizerIntent?.Dispose();
         _recognizerIntent = null;
@@ -142,7 +145,12 @@ public sealed class BardoVoiceService : Service
         base.OnDestroy();
     }
 
-    private string RecognizerLabel => _standardRecognizerAvailable ? "sistema" : "local";
+    private string RecognizerLabelFor(ListeningMode mode) =>
+        mode == ListeningMode.WakeWord && _onDeviceRecognizerAvailable
+            ? "local"
+            : _standardRecognizerAvailable
+                ? "sistema"
+                : "local";
 
     private void AcquireDedicatedResourceLocks()
     {
@@ -241,7 +249,7 @@ public sealed class BardoVoiceService : Service
 
         try
         {
-            recognizer = CreateRecognizer();
+            recognizer = CreateRecognizer(sessionMode);
             var listener = new SessionRecognitionListener(this, sessionId, sessionMode);
             recognizer.SetRecognitionListener(listener);
 
@@ -251,7 +259,9 @@ public sealed class BardoVoiceService : Service
             _activeListener = listener;
             _commandPartialText = null;
 
-            Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} create recognizer={RecognizerLabel}");
+            Log.Info(
+                LogTag,
+                $"{SessionLabel(sessionId, sessionMode)} create recognizer={RecognizerLabelFor(sessionMode)}");
             LastRecognizerEvent = $"S{sessionId} StartListening ({sessionMode})";
 
             if (sessionMode == ListeningMode.Command)
@@ -281,11 +291,15 @@ public sealed class BardoVoiceService : Service
         }
     }
 
-    private SpeechRecognizer CreateRecognizer()
+    private SpeechRecognizer CreateRecognizer(ListeningMode mode)
     {
         SpeechRecognizer? recognizer;
 
-        if (_standardRecognizerAvailable)
+        if (mode == ListeningMode.WakeWord && _onDeviceRecognizerAvailable)
+        {
+            recognizer = SpeechRecognizer.CreateOnDeviceSpeechRecognizer(this);
+        }
+        else if (_standardRecognizerAvailable)
         {
             recognizer = SpeechRecognizer.CreateSpeechRecognizer(this);
         }
@@ -491,8 +505,42 @@ public sealed class BardoVoiceService : Service
         _mode = ListeningMode.Command;
         _commandRetryCount = 0;
         _commandPartialText = null;
+        PlayWakeAcknowledgement();
         SetServiceStatus("Bardo detectado · preparando micrófono…");
         ScheduleListen(350, "nueva sesión exclusiva para el comando");
+    }
+
+    private void PlayWakeAcknowledgement()
+    {
+        try
+        {
+            _feedbackTone ??= new ToneGenerator(Android.Media.Stream.Alarm, 85);
+            _feedbackTone.StopTone();
+            _feedbackTone.StartTone(Tone.PropAck, 180);
+            Log.Info(LogTag, "Tono de confirmación reproducido · habla después del tono");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudo reproducir el tono de confirmación: {ex}");
+        }
+    }
+
+    private void ReleaseFeedbackTone()
+    {
+        try
+        {
+            _feedbackTone?.StopTone();
+            _feedbackTone?.Release();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudo liberar el tono de confirmación: {ex}");
+        }
+        finally
+        {
+            _feedbackTone?.Dispose();
+            _feedbackTone = null;
+        }
     }
 
     private void SchedulePartialCommandCommit(long sessionId, long delayMilliseconds)
@@ -534,9 +582,13 @@ public sealed class BardoVoiceService : Service
             return;
         }
 
-        var normalizedCommand = command.Trim();
+        var normalizedCommand = NormalizeCommand(command);
         if (normalizedCommand.Length == 0)
         {
+            CloseSession(sessionId, "wake word repetida en modo comando", cancelRecognizer);
+            _commandPartialText = null;
+            SetServiceStatus("Te escucho · di la orden después del tono");
+            ScheduleListen(250, "ignorar wake word repetida");
             return;
         }
 
@@ -548,6 +600,42 @@ public sealed class BardoVoiceService : Service
         SetServiceStatus($"Ejecutando: {normalizedCommand}");
         Log.Info(LogTag, $"S{sessionId} [Command] SEND once source={source} text={normalizedCommand}");
         _ = ExecuteCommandAndResumeAsync(sessionId, normalizedCommand);
+    }
+
+    private string NormalizeCommand(string command)
+    {
+        var normalized = command.Trim();
+        if (normalized.Length == 0)
+        {
+            return normalized;
+        }
+
+        var wakeWord = _settings.WakeWord.Trim();
+        var aliases = wakeWord.Equals("bardo", StringComparison.OrdinalIgnoreCase)
+            ? new[] { wakeWord, "pardo", "vardo", "borde" }
+            : new[] { wakeWord };
+
+        foreach (var alias in aliases.Where(value => value.Length > 0))
+        {
+            var match = Regex.Match(
+                normalized,
+                $@"^\s*{Regex.Escape(alias)}(?:(?:[\s,;:.-]+)(?<command>.*))?$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var commandWithoutWakeWord = match.Groups["command"].Value.Trim();
+            Log.Info(
+                LogTag,
+                commandWithoutWakeWord.Length == 0
+                    ? "Wake word repetida durante la sesión de comando; no se enviará"
+                    : $"Wake word inicial eliminada del comando: {commandWithoutWakeWord}");
+            return commandWithoutWakeWord;
+        }
+
+        return normalized;
     }
 
     private async Task ExecuteCommandAndResumeAsync(long sessionId, string command)
@@ -604,7 +692,7 @@ public sealed class BardoVoiceService : Service
         _commandPartialText = null;
         _commandRetryCount = 0;
         _mode = ListeningMode.WakeWord;
-        SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
+        SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabelFor(ListeningMode.WakeWord)}");
         ScheduleListen(200, "retorno a WakeWord");
     }
 
