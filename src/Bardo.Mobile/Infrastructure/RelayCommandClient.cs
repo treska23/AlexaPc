@@ -18,10 +18,15 @@ internal sealed class RelayCommandClient
         CancellationToken cancellationToken = default)
     {
         var endpoint = $"{settings.RelayUrl.TrimEnd('/')}/api/commands";
+        string normalizedCommand = SpokenCommandNormalizer.NormalizeForRelay(command);
+        if (normalizedCommand.Length == 0)
+        {
+            return new RelayCommandResult(false, "La orden reconocida estaba vacía.");
+        }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
-            Content = JsonContent.Create(new RelayCommandRequest(settings.DeviceId, command))
+            Content = JsonContent.Create(new RelayCommandRequest(settings.DeviceId, normalizedCommand))
         };
 
         request.Headers.TryAddWithoutValidation("X-AlexaPc-Api-Key", settings.ApiKey);
