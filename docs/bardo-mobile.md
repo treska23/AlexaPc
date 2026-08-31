@@ -72,7 +72,7 @@ abre Chrome, busca vídeos de jazz en YouTube, coloca Chrome en la pantalla de l
 
 También controla aplicaciones y ventanas, distribución de pantallas, reproducción multimedia, volumen y consultas sobre lo que está abierto en el PC. Las acciones destructivas no se ejecutan por traducción libre.
 
-## Modo dedicado 0.2.0
+## Modo dedicado 0.2.1
 
 La aplicación incluye:
 
