@@ -25,6 +25,7 @@ public sealed class MainActivity : Activity
     private EditText? _apiKey;
     private EditText? _deviceId;
     private EditText? _wakeWord;
+    private EditText? _pcMacAddress;
     private EditText? _testCommand;
     private TextView? _status;
     private TextView? _dedicatedStatus;
@@ -90,6 +91,7 @@ public sealed class MainActivity : Activity
         _apiKey = AddField(content, "API key", settings.ApiKey);
         _deviceId = AddField(content, "Device ID", settings.DeviceId);
         _wakeWord = AddField(content, "Palabra de activación", settings.WakeWord);
+        _pcMacAddress = AddField(content, "MAC del PC · Wake-on-LAN", settings.PcMacAddress);
         _testCommand = AddField(content, "Comando de prueba", "abre YouTube");
 
         var saveButton = AddButton(content, "Guardar configuración");
@@ -138,6 +140,7 @@ public sealed class MainActivity : Activity
         DedicatedModeController.ApplyWindow(this);
         DedicatedModeController.ApplyDeviceOwnerPolicies(this);
         UpdateDedicatedStatus();
+        RefreshLearnedPcMac();
 
         if (BardoVoiceService.IsRunning)
         {
@@ -169,7 +172,11 @@ public sealed class MainActivity : Activity
 
     private void OnVoiceStatusChanged(string status)
     {
-        RunOnUiThread(() => SetStatus(status));
+        RunOnUiThread(() =>
+        {
+            SetStatus(status);
+            RefreshLearnedPcMac();
+        });
     }
 
     private async Task StartListeningAsync()
@@ -228,9 +235,10 @@ public sealed class MainActivity : Activity
             : $"{BardoVoiceService.LastRmsDb:0.0} dB";
         string recognizerEvent = BardoVoiceService.LastRecognizerEvent;
         string dedicatedMode = DedicatedModeController.GetStatus(this);
+        string pcMac = BardoSettingsStore.Load(this).PcMacAddress;
 
         SetStatus(
-            $"Micro={microphoneGranted} · ModeloES={modelInstalled} · MotorLocal={engineReady} · Servicio={running} · RMS={rms} · Evento={recognizerEvent} · {dedicatedMode} · {serviceStatus}");
+            $"Micro={microphoneGranted} · ModeloES={modelInstalled} · MotorLocal={engineReady} · Servicio={running} · RMS={rms} · MAC-PC={(string.IsNullOrWhiteSpace(pcMac) ? "pendiente" : pcMac)} · Evento={recognizerEvent} · {dedicatedMode} · {serviceStatus}");
     }
 
     public override void OnRequestPermissionsResult(
@@ -282,9 +290,24 @@ public sealed class MainActivity : Activity
             ValueOrDefault(_relayUrl, defaults.RelayUrl),
             ValueOrDefault(_apiKey, defaults.ApiKey),
             ValueOrDefault(_deviceId, defaults.DeviceId),
-            ValueOrDefault(_wakeWord, defaults.WakeWord));
+            ValueOrDefault(_wakeWord, defaults.WakeWord),
+            _pcMacAddress?.Text?.Trim() ?? defaults.PcMacAddress);
 
         BardoSettingsStore.Save(this, settings);
+    }
+
+    private void RefreshLearnedPcMac()
+    {
+        if (_pcMacAddress is null || !string.IsNullOrWhiteSpace(_pcMacAddress.Text))
+        {
+            return;
+        }
+
+        string learnedMac = BardoSettingsStore.Load(this).PcMacAddress;
+        if (!string.IsNullOrWhiteSpace(learnedMac))
+        {
+            _pcMacAddress.Text = learnedMac;
+        }
     }
 
     private void RequestRequiredPermissions()
