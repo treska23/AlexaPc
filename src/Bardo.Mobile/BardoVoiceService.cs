@@ -31,30 +31,35 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
     private bool _waitingForResult;
     private bool _usingOnDeviceRecognizer;
 
+    public static bool IsRunning { get; private set; }
+    public static string CurrentStatus { get; private set; } = "detenido";
+
     public override void OnCreate()
     {
         base.OnCreate();
-
-        _handler = new Handler(Looper.MainLooper!);
-        _settings = BardoSettingsStore.Load(this);
-        CreateNotificationChannel();
-        StartAsForeground("Iniciando reconocimiento de voz…");
-
-        var onDeviceAvailable =
-            Build.VERSION.SdkInt >= BuildVersionCodes.S &&
-            SpeechRecognizer.IsOnDeviceRecognitionAvailable(this);
-        var standardAvailable = SpeechRecognizer.IsRecognitionAvailable(this);
-
-        Log.Info(LogTag, $"Reconocimiento local={onDeviceAvailable}, estándar={standardAvailable}");
-
-        if (!onDeviceAvailable && !standardAvailable)
-        {
-            SetServiceStatus("No hay ningún servicio de reconocimiento de voz disponible");
-            return;
-        }
+        IsRunning = true;
+        CurrentStatus = "iniciando servicio";
 
         try
         {
+            _handler = new Handler(Looper.MainLooper!);
+            _settings = BardoSettingsStore.Load(this);
+            CreateNotificationChannel();
+            StartAsForeground("Iniciando reconocimiento de voz…");
+
+            var onDeviceAvailable =
+                Build.VERSION.SdkInt >= BuildVersionCodes.S &&
+                SpeechRecognizer.IsOnDeviceRecognitionAvailable(this);
+            var standardAvailable = SpeechRecognizer.IsRecognitionAvailable(this);
+
+            Log.Info(LogTag, $"Reconocimiento local={onDeviceAvailable}, estándar={standardAvailable}");
+
+            if (!onDeviceAvailable && !standardAvailable)
+            {
+                SetServiceStatus("No hay ningún servicio de reconocimiento de voz disponible");
+                return;
+            }
+
             if (onDeviceAvailable)
             {
                 _recognizer = SpeechRecognizer.CreateOnDeviceSpeechRecognizer(this);
@@ -65,24 +70,24 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
                 _recognizer = SpeechRecognizer.CreateSpeechRecognizer(this);
                 _usingOnDeviceRecognizer = false;
             }
+
+            if (_recognizer is null)
+            {
+                SetServiceStatus("No se pudo crear el reconocedor de voz");
+                return;
+            }
+
+            _recognizer.SetRecognitionListener(this);
+            _recognizerIntent = BuildRecognizerIntent();
+            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {(_usingOnDeviceRecognizer ? "local" : "sistema")}");
+            ScheduleListen(300);
         }
         catch (Exception ex)
         {
-            Log.Error(LogTag, ex.ToString());
-            SetServiceStatus($"No se pudo iniciar la voz: {ex.GetType().Name}");
-            return;
+            Log.Error(LogTag, $"OnCreate falló: {ex}");
+            SetServiceStatus($"Fallo al iniciar: {ex.GetType().Name}: {ex.Message}");
+            StopSelf();
         }
-
-        if (_recognizer is null)
-        {
-            SetServiceStatus("No se pudo crear el reconocedor de voz");
-            return;
-        }
-
-        _recognizer.SetRecognitionListener(this);
-        _recognizerIntent = BuildRecognizerIntent();
-        SetServiceStatus($"Esperando «{_settings.WakeWord}» · {(_usingOnDeviceRecognizer ? "local" : "sistema")}");
-        ScheduleListen(300);
     }
 
     public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
@@ -107,6 +112,8 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
 
     public override void OnDestroy()
     {
+        IsRunning = false;
+        CurrentStatus = "detenido";
         _destroyed = true;
         _shutdown.Cancel();
         _handler?.RemoveCallbacksAndMessages(null);
@@ -133,9 +140,6 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         intent.PutExtra(RecognizerIntent.ExtraLanguage, "es-ES");
         intent.PutExtra(RecognizerIntent.ExtraPartialResults, true);
         intent.PutExtra(RecognizerIntent.ExtraMaxResults, 3);
-
-        // No forzamos ExtraPreferOffline en el reconocedor del sistema. En algunos
-        // móviles devuelve errores si el paquete de español offline no está instalado.
         return intent;
     }
 
@@ -348,6 +352,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
 
     private void SetServiceStatus(string message)
     {
+        CurrentStatus = message;
         Log.Info(LogTag, message);
         UpdateNotification(message);
     }
@@ -378,16 +383,8 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             .Build();
     }
 
-    public void OnReadyForSpeech(Bundle? @params)
-    {
-        Log.Debug(LogTag, "Micrófono listo");
-    }
-
-    public void OnBeginningOfSpeech()
-    {
-        Log.Debug(LogTag, "Inicio de voz");
-    }
-
+    public void OnReadyForSpeech(Bundle? @params) => Log.Debug(LogTag, "Micrófono listo");
+    public void OnBeginningOfSpeech() => Log.Debug(LogTag, "Inicio de voz");
     public void OnRmsChanged(float rmsdB) { }
     public void OnBufferReceived(byte[]? buffer) { }
     public void OnEndOfSpeech() => Log.Debug(LogTag, "Fin de voz");
