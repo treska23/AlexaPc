@@ -5,6 +5,7 @@ using Android.OS;
 using Android.Speech;
 using Android.Util;
 using Bardo.Mobile.Infrastructure;
+using System.Text.RegularExpressions;
 
 namespace Bardo.Mobile;
 
@@ -12,25 +13,33 @@ namespace Bardo.Mobile;
     Name = "com.treska23.bardo.BardoVoiceService",
     Exported = false,
     ForegroundServiceType = ForegroundService.TypeMicrophone)]
-public sealed class BardoVoiceService : Service, IRecognitionListener
+public sealed class BardoVoiceService : Service
 {
     private const string ChannelId = "bardo-listening";
     private const int NotificationId = 1701;
     private const string ActionStop = "com.treska23.bardo.STOP";
     private const string LogTag = "BardoVoice";
+    private const long CommandPartialCommitDelayMilliseconds = 1_200;
+    private const long CommandEndOfSpeechCommitDelayMilliseconds = 650;
 
     private readonly RelayCommandClient _relayClient = new();
     private readonly CancellationTokenSource _shutdown = new();
 
     private Handler? _handler;
-    private SpeechRecognizer? _recognizer;
+    private SpeechRecognizer? _activeRecognizer;
+    private SessionRecognitionListener? _activeListener;
     private Intent? _recognizerIntent;
     private BardoSettings _settings = BardoSettings.Default;
     private ListeningMode _mode = ListeningMode.WakeWord;
+    private long _nextSessionId;
+    private long? _activeSessionId;
+    private ListeningMode? _activeSessionMode;
+    private string? _commandPartialText;
+    private int _commandRetryCount;
     private bool _destroyed;
-    private bool _waitingForResult;
-    private bool _usingOnDeviceRecognizer;
-    private bool _recreatingRecognizer;
+    private bool _commandInFlight;
+    private bool _standardRecognizerAvailable;
+    private bool _onDeviceRecognizerAvailable;
 
     public static bool IsRunning { get; private set; }
     public static string CurrentStatus { get; private set; } = "detenido";
@@ -53,13 +62,24 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             CreateNotificationChannel();
             StartAsForeground("Iniciando reconocimiento de voz…");
 
-            if (!CreateRecognizer())
+            _onDeviceRecognizerAvailable =
+                Build.VERSION.SdkInt >= BuildVersionCodes.S &&
+                SpeechRecognizer.IsOnDeviceRecognitionAvailable(this);
+            _standardRecognizerAvailable = SpeechRecognizer.IsRecognitionAvailable(this);
+
+            Log.Info(
+                LogTag,
+                $"Reconocimiento local={_onDeviceRecognizerAvailable}, estándar={_standardRecognizerAvailable}");
+
+            if (!_onDeviceRecognizerAvailable && !_standardRecognizerAvailable)
             {
+                SetServiceStatus("No hay ningún servicio de reconocimiento de voz disponible");
                 return;
             }
 
+            _recognizerIntent = BuildRecognizerIntent();
             SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
-            ScheduleListen(300);
+            ScheduleListen(300, "inicio del servicio");
         }
         catch (Exception ex)
         {
@@ -79,10 +99,14 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         }
 
         _settings = BardoSettingsStore.Load(this);
-        if (_recognizer is not null && _mode == ListeningMode.WakeWord)
+        if (_activeSessionId is null && !_commandInFlight)
         {
-            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
-            ScheduleListen(150);
+            if (_mode == ListeningMode.WakeWord)
+            {
+                SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
+            }
+
+            ScheduleListen(150, "OnStartCommand sin sesión activa");
         }
 
         return StartCommandResult.Sticky;
@@ -99,71 +123,20 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         _destroyed = true;
         _shutdown.Cancel();
         _handler?.RemoveCallbacksAndMessages(null);
-        DestroyRecognizer();
+
+        if (_activeSessionId is long sessionId)
+        {
+            CloseSession(sessionId, "destrucción del servicio", cancel: true);
+        }
+
+        _handler = null;
+        _recognizerIntent?.Dispose();
+        _recognizerIntent = null;
         _shutdown.Dispose();
         base.OnDestroy();
     }
 
-    private string RecognizerLabel => _usingOnDeviceRecognizer ? "local" : "sistema";
-
-    private bool CreateRecognizer()
-    {
-        var onDeviceAvailable =
-            Build.VERSION.SdkInt >= BuildVersionCodes.S &&
-            SpeechRecognizer.IsOnDeviceRecognitionAvailable(this);
-        var standardAvailable = SpeechRecognizer.IsRecognitionAvailable(this);
-
-        Log.Info(LogTag, $"Reconocimiento local={onDeviceAvailable}, estándar={standardAvailable}");
-
-        if (!onDeviceAvailable && !standardAvailable)
-        {
-            SetServiceStatus("No hay ningún servicio de reconocimiento de voz disponible");
-            return false;
-        }
-
-        DestroyRecognizer();
-
-        // Para este OPPO priorizamos el reconocedor estándar. El reconocedor local
-        // anuncia soporte pero se ha mostrado menos fiable con español.
-        if (standardAvailable)
-        {
-            _recognizer = SpeechRecognizer.CreateSpeechRecognizer(this);
-            _usingOnDeviceRecognizer = false;
-        }
-        else
-        {
-            _recognizer = SpeechRecognizer.CreateOnDeviceSpeechRecognizer(this);
-            _usingOnDeviceRecognizer = true;
-        }
-
-        if (_recognizer is null)
-        {
-            SetServiceStatus("No se pudo crear el reconocedor de voz");
-            return false;
-        }
-
-        _recognizer.SetRecognitionListener(this);
-        _recognizerIntent = BuildRecognizerIntent();
-        _waitingForResult = false;
-        return true;
-    }
-
-    private void DestroyRecognizer()
-    {
-        try
-        {
-            _recognizer?.Cancel();
-            _recognizer?.Destroy();
-        }
-        catch (Exception ex)
-        {
-            Log.Warn(LogTag, $"DestroyRecognizer: {ex.Message}");
-        }
-
-        _recognizer = null;
-        _recognizerIntent = null;
-        _waitingForResult = false;
-    }
+    private string RecognizerLabel => _standardRecognizerAvailable ? "sistema" : "local";
 
     private Intent BuildRecognizerIntent()
     {
@@ -172,254 +145,507 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         intent.PutExtra(RecognizerIntent.ExtraLanguage, "es-ES");
         intent.PutExtra(RecognizerIntent.ExtraPartialResults, true);
         intent.PutExtra(RecognizerIntent.ExtraMaxResults, 3);
+        intent.PutExtra(RecognizerIntent.ExtraSpeechInputMinimumLengthMillis, 250L);
+        intent.PutExtra(RecognizerIntent.ExtraSpeechInputCompleteSilenceLengthMillis, 600L);
+        intent.PutExtra(RecognizerIntent.ExtraSpeechInputPossiblyCompleteSilenceLengthMillis, 600L);
         return intent;
     }
 
-    private void ScheduleListen(long delayMilliseconds)
+    private void ScheduleListen(long delayMilliseconds, string reason)
     {
-        if (_destroyed || _recognizer is null || _recognizerIntent is null || _handler is null)
+        if (_destroyed || _recognizerIntent is null || _handler is null || _commandInFlight)
         {
             return;
         }
 
         _handler.RemoveCallbacksAndMessages(null);
-        _handler.PostDelayed(StartListening, delayMilliseconds);
+        Log.Debug(LogTag, $"Programando escucha mode={_mode} delay={delayMilliseconds} ms reason={reason}");
+        _handler.PostDelayed(StartNewSession, delayMilliseconds);
     }
 
-    private void StartListening()
+    private void StartNewSession()
     {
-        if (_destroyed || _recreatingRecognizer || _waitingForResult || _recognizer is null || _recognizerIntent is null)
+        if (_destroyed ||
+            _commandInFlight ||
+            _activeSessionId is not null ||
+            _recognizerIntent is null)
         {
             return;
         }
+
+        var sessionId = ++_nextSessionId;
+        var sessionMode = _mode;
+        SpeechRecognizer? recognizer = null;
 
         try
         {
-            _waitingForResult = true;
-            LastRecognizerEvent = $"StartListening ({_mode})";
-            _recognizer.StartListening(_recognizerIntent);
-            Log.Debug(LogTag, $"StartListening mode={_mode}");
+            recognizer = CreateRecognizer();
+            var listener = new SessionRecognitionListener(this, sessionId, sessionMode);
+            recognizer.SetRecognitionListener(listener);
+
+            _activeSessionId = sessionId;
+            _activeSessionMode = sessionMode;
+            _activeRecognizer = recognizer;
+            _activeListener = listener;
+            _commandPartialText = null;
+
+            Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} create recognizer={RecognizerLabel}");
+            LastRecognizerEvent = $"S{sessionId} StartListening ({sessionMode})";
+
+            if (sessionMode == ListeningMode.Command)
+            {
+                SetServiceStatus("Bardo · habla ahora");
+            }
+
+            Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} StartListening");
+            recognizer.StartListening(_recognizerIntent);
         }
         catch (Exception ex)
         {
-            _waitingForResult = false;
-            LastRecognizerEvent = $"StartListening falló: {ex.GetType().Name}";
-            Log.Warn(LogTag, $"StartListening falló: {ex}");
+            LastRecognizerEvent = $"S{sessionId} StartListening falló: {ex.GetType().Name}";
+            Log.Warn(LogTag, $"{SessionLabel(sessionId, sessionMode)} StartListening falló: {ex}");
+
+            if (_activeSessionId == sessionId)
+            {
+                CloseSession(sessionId, "StartListening falló", cancel: true);
+            }
+            else
+            {
+                DestroyRecognizer(recognizer, sessionId, sessionMode, "fallo antes de activar sesión", cancel: true);
+            }
+
             SetServiceStatus($"Error iniciando micrófono: {ex.GetType().Name}");
-            ScheduleListen(1200);
+            ScheduleListen(1_200, "reintento tras fallo de StartListening");
         }
     }
 
-    public void OnResults(Bundle? results)
+    private SpeechRecognizer CreateRecognizer()
     {
-        if (_recreatingRecognizer)
+        SpeechRecognizer? recognizer;
+
+        if (_standardRecognizerAvailable)
+        {
+            recognizer = SpeechRecognizer.CreateSpeechRecognizer(this);
+        }
+        else
+        {
+            recognizer = SpeechRecognizer.CreateOnDeviceSpeechRecognizer(this);
+        }
+
+        return recognizer ?? throw new InvalidOperationException("Android devolvió un SpeechRecognizer nulo.");
+    }
+
+    private bool IsCurrentSession(long sessionId, ListeningMode sessionMode, string callback)
+    {
+        var isCurrent =
+            !_destroyed &&
+            _activeSessionId == sessionId &&
+            _activeSessionMode == sessionMode &&
+            _mode == sessionMode;
+
+        if (!isCurrent)
+        {
+            var active = _activeSessionId is long activeId
+                ? $"S{activeId}/{_activeSessionMode}"
+                : "ninguna";
+            Log.Warn(
+                LogTag,
+                $"{SessionLabel(sessionId, sessionMode)} {callback} IGNORADO; active={active}, mode={_mode}, destroyed={_destroyed}");
+        }
+
+        return isCurrent;
+    }
+
+    private void HandleReadyForSpeech(long sessionId, ListeningMode sessionMode)
+    {
+        if (!IsCurrentSession(sessionId, sessionMode, nameof(IRecognitionListener.OnReadyForSpeech)))
         {
             return;
         }
 
-        _waitingForResult = false;
-        var text = GetBestResult(results);
-        LastRecognizerEvent = $"resultado: {text ?? "<vacío>"}";
-        Log.Info(LogTag, $"Resultado: {text ?? "<vacío>"} · mode={_mode}");
+        LastRecognizerEvent = $"S{sessionId} micrófono listo · mode={sessionMode}";
+        Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} OnReadyForSpeech");
+
+        if (sessionMode == ListeningMode.Command)
+        {
+            SetServiceStatus("Bardo · habla ahora");
+        }
+    }
+
+    private void HandleBeginningOfSpeech(long sessionId, ListeningMode sessionMode)
+    {
+        if (!IsCurrentSession(sessionId, sessionMode, nameof(IRecognitionListener.OnBeginningOfSpeech)))
+        {
+            return;
+        }
+
+        LastRecognizerEvent = $"S{sessionId} voz detectada · mode={sessionMode}";
+        Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} OnBeginningOfSpeech");
+
+        if (sessionMode == ListeningMode.Command)
+        {
+            SetServiceStatus("Escuchando comando…");
+        }
+    }
+
+    private void HandlePartialResults(long sessionId, ListeningMode sessionMode, Bundle? results)
+    {
+        if (!IsCurrentSession(sessionId, sessionMode, nameof(IRecognitionListener.OnPartialResults)))
+        {
+            return;
+        }
+
+        var alternatives = GetRecognitionResults(results);
+        var text = alternatives.FirstOrDefault();
+        LastRecognizerEvent = $"S{sessionId} parcial: {text ?? "<vacío>"}";
+        Log.Debug(
+            LogTag,
+            $"{SessionLabel(sessionId, sessionMode)} OnPartialResults alternatives={FormatAlternatives(alternatives)}");
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            ScheduleListen(250);
             return;
         }
 
-        if (_mode == ListeningMode.WakeWord)
+        if (sessionMode == ListeningMode.WakeWord)
         {
-            if (!TryExtractWakeCommand(text, out var command))
+            var wakeMatch = FindWakeWordResult(alternatives);
+            if (wakeMatch is not null)
             {
-                ScheduleListen(200);
+                EnterCommandMode(sessionId, wakeMatch, "OnPartialResults");
+            }
+
+            return;
+        }
+
+        _commandPartialText = text.Trim();
+        SchedulePartialCommandCommit(sessionId, CommandPartialCommitDelayMilliseconds);
+    }
+
+    private void HandleResults(long sessionId, ListeningMode sessionMode, Bundle? results)
+    {
+        if (!IsCurrentSession(sessionId, sessionMode, nameof(IRecognitionListener.OnResults)))
+        {
+            return;
+        }
+
+        var alternatives = GetRecognitionResults(results);
+        var text = alternatives.FirstOrDefault();
+        LastRecognizerEvent = $"S{sessionId} resultado: {text ?? "<vacío>"}";
+        Log.Info(
+            LogTag,
+            $"{SessionLabel(sessionId, sessionMode)} OnResults alternatives={FormatAlternatives(alternatives)}");
+
+        if (sessionMode == ListeningMode.WakeWord)
+        {
+            var wakeMatch = FindWakeWordResult(alternatives);
+            if (wakeMatch is not null)
+            {
+                EnterCommandMode(sessionId, wakeMatch, "OnResults");
                 return;
             }
 
-            if (!string.IsNullOrWhiteSpace(command))
-            {
-                _ = ExecuteCommandAndResumeAsync(command);
-                return;
-            }
-
-            BeginCommandSession();
+            CloseSession(sessionId, "resultado de wake word sin coincidencia", cancel: false);
+            ScheduleListen(200, "continuar esperando wake word");
             return;
         }
 
-        _ = ExecuteCommandAndResumeAsync(text.Trim());
+        var command = string.IsNullOrWhiteSpace(text) ? _commandPartialText : text.Trim();
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            CloseSession(sessionId, "resultado de comando vacío", cancel: false);
+            RetryOrLeaveCommandMode("No he entendido el comando");
+            return;
+        }
+
+        DispatchCommand(sessionId, command, "OnResults", cancelRecognizer: false);
     }
 
-    public void OnPartialResults(Bundle? partialResults)
+    private void HandleError(long sessionId, ListeningMode sessionMode, SpeechRecognizerError error)
     {
-        if (_recreatingRecognizer)
+        if (!IsCurrentSession(sessionId, sessionMode, nameof(IRecognitionListener.OnError)))
         {
             return;
         }
 
-        var text = GetBestResult(partialResults);
-        if (string.IsNullOrWhiteSpace(text))
+        LastRecognizerEvent = $"S{sessionId} error: {error} · mode={sessionMode}";
+        Log.Warn(LogTag, $"{SessionLabel(sessionId, sessionMode)} OnError error={error}");
+        CloseSession(sessionId, $"OnError {error}", cancel: false);
+
+        if (sessionMode == ListeningMode.Command)
         {
+            RetryOrLeaveCommandMode(error is SpeechRecognizerError.NoMatch or SpeechRecognizerError.SpeechTimeout
+                ? "No te he oído"
+                : $"Error de voz: {error}");
             return;
         }
-
-        LastRecognizerEvent = $"parcial: {text}";
-        Log.Debug(LogTag, $"Parcial: {text} · mode={_mode}");
-
-        if (_mode != ListeningMode.WakeWord || !ContainsWakeWord(text))
-        {
-            return;
-        }
-
-        LastRecognizerEvent = $"wake word detectada: {text}";
-        BeginCommandSession();
-    }
-
-    private void BeginCommandSession()
-    {
-        if (_recreatingRecognizer || _destroyed)
-        {
-            return;
-        }
-
-        _mode = ListeningMode.Command;
-        _recreatingRecognizer = true;
-        SetServiceStatus("Bardo detectado · preparando escucha del comando…");
-
-        // En este OPPO reutilizar el SpeechRecognizer justo después de Cancel puede
-        // dejar la segunda sesión muda. Creamos una instancia nueva para el comando.
-        DestroyRecognizer();
-
-        if (_handler is null)
-        {
-            _recreatingRecognizer = false;
-            return;
-        }
-
-        _handler.RemoveCallbacksAndMessages(null);
-        _handler.PostDelayed(() =>
-        {
-            if (_destroyed)
-            {
-                return;
-            }
-
-            try
-            {
-                if (!CreateRecognizer())
-                {
-                    _recreatingRecognizer = false;
-                    return;
-                }
-
-                _recreatingRecognizer = false;
-                SetServiceStatus("Bardo detectado · escuchando comando…");
-                ScheduleListen(250);
-            }
-            catch (Exception ex)
-            {
-                _recreatingRecognizer = false;
-                LastRecognizerEvent = $"recrear falló: {ex.GetType().Name}";
-                SetServiceStatus($"Error preparando comando: {ex.GetType().Name}");
-                Log.Error(LogTag, ex.ToString());
-                ReturnToWakeWord();
-            }
-        }, 700);
-    }
-
-    public void OnError(SpeechRecognizerError error)
-    {
-        if (_recreatingRecognizer || _destroyed)
-        {
-            return;
-        }
-
-        _waitingForResult = false;
-        LastRecognizerEvent = $"error: {error} · mode={_mode}";
-        Log.Warn(LogTag, $"SpeechRecognizer error: {error} · mode={_mode}");
 
         if (error is not SpeechRecognizerError.NoMatch and not SpeechRecognizerError.SpeechTimeout)
         {
             SetServiceStatus($"Voz: {error} · reintentando");
         }
 
-        ScheduleListen(error == SpeechRecognizerError.RecognizerBusy ? 1400 : 450);
+        ScheduleListen(error == SpeechRecognizerError.RecognizerBusy ? 1_400 : 450, $"OnError {error}");
     }
 
-    private async Task ExecuteCommandAndResumeAsync(string command)
+    private void HandleEndOfSpeech(long sessionId, ListeningMode sessionMode)
     {
-        if (string.IsNullOrWhiteSpace(command))
+        if (!IsCurrentSession(sessionId, sessionMode, nameof(IRecognitionListener.OnEndOfSpeech)))
         {
-            ReturnToWakeWord();
             return;
         }
 
-        SetServiceStatus($"Ejecutando: {command}");
-        Log.Info(LogTag, $"Enviando comando: {command}");
+        LastRecognizerEvent = $"S{sessionId} fin de voz · mode={sessionMode}";
+        Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} OnEndOfSpeech");
 
-        var result = await _relayClient.SendAsync(_settings, command, _shutdown.Token);
+        if (sessionMode == ListeningMode.Command && !string.IsNullOrWhiteSpace(_commandPartialText))
+        {
+            SchedulePartialCommandCommit(sessionId, CommandEndOfSpeechCommitDelayMilliseconds);
+        }
+    }
+
+    private void HandleRmsChanged(long sessionId, ListeningMode sessionMode, float rmsdB)
+    {
+        if (_activeSessionId == sessionId && _activeSessionMode == sessionMode)
+        {
+            LastRmsDb = rmsdB;
+        }
+    }
+
+    private void EnterCommandMode(long wakeSessionId, string wakeText, string source)
+    {
+        if (!IsCurrentSession(wakeSessionId, ListeningMode.WakeWord, source))
+        {
+            return;
+        }
+
+        LastRecognizerEvent = $"S{wakeSessionId} Bardo detectado: {wakeText}";
+        Log.Info(LogTag, $"{SessionLabel(wakeSessionId, ListeningMode.WakeWord)} wake detectada via {source}");
+
+        // La sesión queda invalidada ANTES de Cancel/Destroy. Así, cualquier OnError u
+        // OnResults tardío del recognizer anterior conserva su id, pero no puede tocar
+        // el estado de la nueva sesión de comando.
+        CloseSession(wakeSessionId, $"transición WakeWord -> Command via {source}", cancel: true);
+        _mode = ListeningMode.Command;
+        _commandRetryCount = 0;
+        _commandPartialText = null;
+        SetServiceStatus("Bardo detectado · preparando micrófono…");
+        ScheduleListen(350, "nueva sesión exclusiva para el comando");
+    }
+
+    private void SchedulePartialCommandCommit(long sessionId, long delayMilliseconds)
+    {
+        if (_handler is null)
+        {
+            return;
+        }
+
+        _handler.RemoveCallbacksAndMessages(null);
+        Log.Debug(LogTag, $"S{sessionId} [Command] programando fallback parcial en {delayMilliseconds} ms");
+        _handler.PostDelayed(() => CommitPartialCommand(sessionId), delayMilliseconds);
+    }
+
+    private void CommitPartialCommand(long sessionId)
+    {
+        if (!IsCurrentSession(sessionId, ListeningMode.Command, "fallback de parcial"))
+        {
+            return;
+        }
+
+        var command = _commandPartialText?.Trim();
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        DispatchCommand(sessionId, command, "fallback de OnPartialResults", cancelRecognizer: true);
+    }
+
+    private void DispatchCommand(
+        long sessionId,
+        string command,
+        string source,
+        bool cancelRecognizer)
+    {
+        if (!IsCurrentSession(sessionId, ListeningMode.Command, source) || _commandInFlight)
+        {
+            return;
+        }
+
+        var normalizedCommand = command.Trim();
+        if (normalizedCommand.Length == 0)
+        {
+            return;
+        }
+
+        // Invalidar/cerrar antes del POST garantiza que un final posterior al parcial,
+        // o cualquier callback duplicado, no puede ejecutar el comando por segunda vez.
+        CloseSession(sessionId, $"comando capturado via {source}", cancelRecognizer);
+        _commandInFlight = true;
+        _commandPartialText = null;
+        SetServiceStatus($"Ejecutando: {normalizedCommand}");
+        Log.Info(LogTag, $"S{sessionId} [Command] SEND once source={source} text={normalizedCommand}");
+        _ = ExecuteCommandAndResumeAsync(sessionId, normalizedCommand);
+    }
+
+    private async Task ExecuteCommandAndResumeAsync(long sessionId, string command)
+    {
+        var result = await _relayClient.SendAsync(_settings, command, _shutdown.Token).ConfigureAwait(false);
         if (_destroyed)
         {
             return;
         }
 
-        Log.Info(LogTag, $"Relay success={result.Success}: {result.Message}");
-        SetServiceStatus(result.Success
-            ? $"Hecho · {result.Message}"
-            : $"Error · {result.Message}");
+        _handler?.Post(() =>
+        {
+            if (_destroyed)
+            {
+                return;
+            }
 
-        try
+            Log.Info(LogTag, $"S{sessionId} [Command] relay success={result.Success}: {result.Message}");
+            SetServiceStatus(result.Success
+                ? $"Hecho · {result.Message}"
+                : $"Error · {result.Message}");
+
+            _handler?.PostDelayed(ReturnToWakeWord, 900);
+        });
+    }
+
+    private void RetryOrLeaveCommandMode(string reason)
+    {
+        if (_commandRetryCount == 0)
         {
-            await Task.Delay(900, _shutdown.Token);
-        }
-        catch (System.OperationCanceledException)
-        {
+            _commandRetryCount++;
+            SetServiceStatus($"{reason} · habla ahora");
+            ScheduleListen(300, "segundo intento de comando");
             return;
         }
 
-        ReturnToWakeWord();
+        SetServiceStatus($"{reason} · volviendo a esperar Bardo");
+        _handler?.PostDelayed(ReturnToWakeWord, 700);
     }
 
     private void ReturnToWakeWord()
     {
+        if (_destroyed)
+        {
+            return;
+        }
+
+        if (_activeSessionId is long sessionId)
+        {
+            CloseSession(sessionId, "retorno forzado a WakeWord", cancel: true);
+        }
+
+        _commandInFlight = false;
+        _commandPartialText = null;
+        _commandRetryCount = 0;
         _mode = ListeningMode.WakeWord;
-        _recreatingRecognizer = false;
-        _waitingForResult = false;
         SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
-        ScheduleListen(200);
+        ScheduleListen(200, "retorno a WakeWord");
     }
 
-    private bool TryExtractWakeCommand(string text, out string command)
+    private void CloseSession(long sessionId, string reason, bool cancel)
     {
-        command = string.Empty;
+        if (_activeSessionId != sessionId)
+        {
+            Log.Warn(LogTag, $"S{sessionId} CloseSession ignorado; ya no es la sesión activa ({reason})");
+            return;
+        }
+
+        var recognizer = _activeRecognizer;
+        var sessionMode = _activeSessionMode ?? _mode;
+
+        // Es deliberado que primero se borre la identidad activa: Cancel y Destroy
+        // pueden producir callbacks síncronos o encolados en algunos fabricantes.
+        _activeSessionId = null;
+        _activeSessionMode = null;
+        _activeRecognizer = null;
+        _activeListener = null;
+        _handler?.RemoveCallbacksAndMessages(null);
+
+        Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} close reason={reason}");
+        DestroyRecognizer(recognizer, sessionId, sessionMode, reason, cancel);
+    }
+
+    private static void DestroyRecognizer(
+        SpeechRecognizer? recognizer,
+        long sessionId,
+        ListeningMode sessionMode,
+        string reason,
+        bool cancel)
+    {
+        if (recognizer is null)
+        {
+            return;
+        }
+
+        if (cancel)
+        {
+            try
+            {
+                Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} Cancel reason={reason}");
+                recognizer.Cancel();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn(LogTag, $"{SessionLabel(sessionId, sessionMode)} Cancel falló: {ex.Message}");
+            }
+        }
+
+        try
+        {
+            Log.Info(LogTag, $"{SessionLabel(sessionId, sessionMode)} Destroy reason={reason}");
+            recognizer.Destroy();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"{SessionLabel(sessionId, sessionMode)} Destroy falló: {ex.Message}");
+        }
+    }
+
+    private string? FindWakeWordResult(IEnumerable<string> alternatives) =>
+        alternatives.FirstOrDefault(MatchesWakeWord);
+
+    private bool MatchesWakeWord(string text)
+    {
         var wakeWord = _settings.WakeWord.Trim();
         if (wakeWord.Length == 0)
         {
             return false;
         }
 
-        var index = text.IndexOf(wakeWord, StringComparison.OrdinalIgnoreCase);
-        if (index < 0)
+        if (ContainsWholePhrase(text, wakeWord))
         {
-            return false;
+            return true;
         }
 
-        var remainderIndex = index + wakeWord.Length;
-        if (remainderIndex < text.Length)
-        {
-            command = text[remainderIndex..].Trim(' ', ',', '.', ':', ';', '-', '—');
-        }
-
-        return true;
+        // En este OPPO, Google Speech ha devuelto repetidamente «Pardo» al oír
+        // «Bardo». La equivalencia se limita a la wake word predeterminada para no
+        // relajar otras palabras de activación configuradas por el usuario.
+        return wakeWord.Equals("bardo", StringComparison.OrdinalIgnoreCase) &&
+               ContainsWholePhrase(text, "pardo");
     }
 
-    private bool ContainsWakeWord(string text) =>
-        text.Contains(_settings.WakeWord.Trim(), StringComparison.OrdinalIgnoreCase);
+    private static bool ContainsWholePhrase(string text, string phrase) =>
+        Regex.IsMatch(
+            text,
+            $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(phrase)}(?![\p{{L}}\p{{N}}])",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-    private static string? GetBestResult(Bundle? bundle)
+    private static IReadOnlyList<string> GetRecognitionResults(Bundle? bundle)
     {
         var values = bundle?.GetStringArrayList(SpeechRecognizer.ResultsRecognition);
-        return values is { Count: > 0 } ? values[0] : null;
+        return values is { Count: > 0 }
+            ? values.Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value.Trim()).ToArray()
+            : [];
     }
+
+    private static string FormatAlternatives(IReadOnlyList<string> alternatives) =>
+        alternatives.Count == 0 ? "<vacío>" : string.Join(" | ", alternatives);
+
+    private static string SessionLabel(long sessionId, ListeningMode mode) => $"S{sessionId} [{mode}]";
 
     private void CreateNotificationChannel()
     {
@@ -479,54 +705,48 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             stopIntent,
             PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
 
-        return new Notification.Builder(this, ChannelId)
-            .SetContentTitle("Bardo")
-            .SetContentText(message)
-            .SetSmallIcon(Android.Resource.Drawable.IcDialogInfo)
-            .SetOngoing(true)
-            .AddAction(Android.Resource.Drawable.IcDelete, "Parar", stopPendingIntent)
-            .Build();
+        var builder = new Notification.Builder(this, ChannelId);
+        builder.SetContentTitle("Bardo");
+        builder.SetContentText(message);
+        builder.SetSmallIcon(Android.Resource.Drawable.IcDialogInfo);
+        builder.SetOngoing(true);
+        builder.AddAction(Android.Resource.Drawable.IcDelete, "Parar", stopPendingIntent);
+        return builder.Build() ?? throw new InvalidOperationException("No se pudo crear la notificación de Bardo.");
     }
 
-    public void OnReadyForSpeech(Bundle? @params)
+    private sealed class SessionRecognitionListener(
+        BardoVoiceService owner,
+        long sessionId,
+        ListeningMode sessionMode) : Java.Lang.Object, IRecognitionListener
     {
-        LastRecognizerEvent = $"micrófono listo · mode={_mode}";
-        Log.Debug(LogTag, LastRecognizerEvent);
+        public void OnReadyForSpeech(Bundle? @params) =>
+            owner.HandleReadyForSpeech(sessionId, sessionMode);
 
-        if (_mode == ListeningMode.Command)
-        {
-            SetServiceStatus("Bardo detectado · habla ahora");
-        }
+        public void OnBeginningOfSpeech() =>
+            owner.HandleBeginningOfSpeech(sessionId, sessionMode);
+
+        public void OnRmsChanged(float rmsdB) =>
+            owner.HandleRmsChanged(sessionId, sessionMode, rmsdB);
+
+        public void OnBufferReceived(byte[]? buffer) { }
+
+        public void OnEndOfSpeech() =>
+            owner.HandleEndOfSpeech(sessionId, sessionMode);
+
+        public void OnError(SpeechRecognizerError error) =>
+            owner.HandleError(sessionId, sessionMode, error);
+
+        public void OnResults(Bundle? results) =>
+            owner.HandleResults(sessionId, sessionMode, results);
+
+        public void OnPartialResults(Bundle? partialResults) =>
+            owner.HandlePartialResults(sessionId, sessionMode, partialResults);
+
+        public void OnEvent(int eventType, Bundle? @params) { }
+        public void OnSegmentResults(Bundle segmentResults) { }
+        public void OnEndOfSegmentedSession() { }
+        public void OnLanguageDetection(Bundle results) { }
     }
-
-    public void OnBeginningOfSpeech()
-    {
-        LastRecognizerEvent = $"voz detectada · mode={_mode}";
-        Log.Debug(LogTag, LastRecognizerEvent);
-
-        if (_mode == ListeningMode.Command)
-        {
-            SetServiceStatus("Escuchando comando…");
-        }
-    }
-
-    public void OnRmsChanged(float rmsdB)
-    {
-        LastRmsDb = rmsdB;
-    }
-
-    public void OnBufferReceived(byte[]? buffer) { }
-
-    public void OnEndOfSpeech()
-    {
-        LastRecognizerEvent = $"fin de voz · mode={_mode}";
-        Log.Debug(LogTag, LastRecognizerEvent);
-    }
-
-    public void OnEvent(int eventType, Bundle? @params) { }
-    public void OnSegmentResults(Bundle segmentResults) { }
-    public void OnEndOfSegmentedSession() { }
-    public void OnLanguageDetection(Bundle results) { }
 
     private enum ListeningMode
     {
