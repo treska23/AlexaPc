@@ -1,6 +1,8 @@
 using Android.App;
 using Android.Content;
 using Android.Content.PM;
+using Android.Net;
+using Android.Net.Wifi;
 using Android.OS;
 using Android.Speech;
 using Android.Util;
@@ -26,6 +28,8 @@ public sealed class BardoVoiceService : Service
     private readonly CancellationTokenSource _shutdown = new();
 
     private Handler? _handler;
+    private PowerManager.WakeLock? _cpuWakeLock;
+    private WifiManager.WifiLock? _wifiLock;
     private SpeechRecognizer? _activeRecognizer;
     private SessionRecognitionListener? _activeListener;
     private Intent? _recognizerIntent;
@@ -61,6 +65,7 @@ public sealed class BardoVoiceService : Service
             _settings = BardoSettingsStore.Load(this);
             CreateNotificationChannel();
             StartAsForeground("Iniciando reconocimiento de voz…");
+            AcquireDedicatedResourceLocks();
 
             _onDeviceRecognizerAvailable =
                 Build.VERSION.SdkInt >= BuildVersionCodes.S &&
@@ -130,6 +135,7 @@ public sealed class BardoVoiceService : Service
         }
 
         _handler = null;
+        ReleaseDedicatedResourceLocks();
         _recognizerIntent?.Dispose();
         _recognizerIntent = null;
         _shutdown.Dispose();
@@ -137,6 +143,62 @@ public sealed class BardoVoiceService : Service
     }
 
     private string RecognizerLabel => _standardRecognizerAvailable ? "sistema" : "local";
+
+    private void AcquireDedicatedResourceLocks()
+    {
+        try
+        {
+            var powerManager = (PowerManager?)GetSystemService(PowerService);
+            _cpuWakeLock = powerManager?.NewWakeLock(
+                WakeLockFlags.Partial,
+                "com.treska23.bardo:voice-cpu");
+            _cpuWakeLock?.SetReferenceCounted(false);
+            _cpuWakeLock?.Acquire();
+
+            var wifiManager =
+                (WifiManager?)ApplicationContext?.GetSystemService(WifiService);
+            _wifiLock = wifiManager?.CreateWifiLock(
+                WifiMode.FullHighPerf,
+                "com.treska23.bardo:voice-wifi");
+            _wifiLock?.SetReferenceCounted(false);
+            _wifiLock?.Acquire();
+
+            Log.Info(
+                LogTag,
+                $"Recursos dedicados: CPU={_cpuWakeLock?.IsHeld == true}, WiFi={_wifiLock?.IsHeld == true}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudieron reservar todos los recursos dedicados: {ex}");
+        }
+    }
+
+    private void ReleaseDedicatedResourceLocks()
+    {
+        try
+        {
+            if (_wifiLock?.IsHeld == true)
+            {
+                _wifiLock.Release();
+            }
+
+            if (_cpuWakeLock?.IsHeld == true)
+            {
+                _cpuWakeLock.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudieron liberar todos los recursos dedicados: {ex}");
+        }
+        finally
+        {
+            _wifiLock?.Dispose();
+            _wifiLock = null;
+            _cpuWakeLock?.Dispose();
+            _cpuWakeLock = null;
+        }
+    }
 
     private Intent BuildRecognizerIntent()
     {
@@ -621,11 +683,13 @@ public sealed class BardoVoiceService : Service
             return true;
         }
 
-        // En este OPPO, Google Speech ha devuelto repetidamente «Pardo» al oír
+        // En este OPPO, el reconocimiento ha devuelto variantes fonéticas al oír
         // «Bardo». La equivalencia se limita a la wake word predeterminada para no
         // relajar otras palabras de activación configuradas por el usuario.
         return wakeWord.Equals("bardo", StringComparison.OrdinalIgnoreCase) &&
-               ContainsWholePhrase(text, "pardo");
+               (ContainsWholePhrase(text, "pardo") ||
+                ContainsWholePhrase(text, "vardo") ||
+                ContainsWholePhrase(text, "borde"));
     }
 
     private static bool ContainsWholePhrase(string text, string phrase) =>
@@ -662,6 +726,9 @@ public sealed class BardoVoiceService : Service
         {
             Description = "Mantiene activo el asistente de voz Bardo"
         };
+        channel.EnableLights(false);
+        channel.EnableVibration(false);
+        channel.SetSound(null, null);
 
         manager.CreateNotificationChannel(channel);
     }
@@ -710,6 +777,9 @@ public sealed class BardoVoiceService : Service
         builder.SetContentText(message);
         builder.SetSmallIcon(Android.Resource.Drawable.IcDialogInfo);
         builder.SetOngoing(true);
+        builder.SetOnlyAlertOnce(true);
+        builder.SetCategory(Notification.CategoryService);
+        builder.SetVisibility(NotificationVisibility.Secret);
         builder.AddAction(Android.Resource.Drawable.IcDelete, "Parar", stopPendingIntent);
         return builder.Build() ?? throw new InvalidOperationException("No se pudo crear la notificación de Bardo.");
     }

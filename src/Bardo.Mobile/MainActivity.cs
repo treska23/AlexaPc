@@ -3,6 +3,7 @@ using Android.Content;
 using Android.Content.PM;
 using Android.OS;
 using Android.Speech;
+using Android.Views;
 using Android.Widget;
 using Bardo.Mobile.Infrastructure;
 
@@ -12,7 +13,11 @@ namespace Bardo.Mobile;
     Label = "Bardo",
     MainLauncher = true,
     Exported = true,
+    LaunchMode = LaunchMode.SingleTask,
     ScreenOrientation = ScreenOrientation.Portrait)]
+[IntentFilter(
+    [Intent.ActionMain],
+    Categories = [Intent.CategoryHome, Intent.CategoryDefault])]
 public sealed class MainActivity : Activity
 {
     private const int PermissionRequestCode = 1001;
@@ -23,11 +28,14 @@ public sealed class MainActivity : Activity
     private EditText? _wakeWord;
     private EditText? _testCommand;
     private TextView? _status;
+    private TextView? _dedicatedStatus;
     private bool _startAfterPermission;
+    private bool _autoStartAttempted;
 
     protected override void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
+        DedicatedModeController.ApplyWindow(this);
 
         var settings = BardoSettingsStore.Load(this);
         var root = new ScrollView(this);
@@ -39,10 +47,19 @@ public sealed class MainActivity : Activity
         content.SetPadding(Dp(20), Dp(28), Dp(20), Dp(28));
         root.AddView(content);
 
+        var logo = new ImageView(this);
+        logo.SetImageResource(Resource.Drawable.bardo_app_icon);
+        logo.SetAdjustViewBounds(true);
+        content.AddView(logo, new LinearLayout.LayoutParams(Dp(112), Dp(112))
+        {
+            Gravity = GravityFlags.CenterHorizontal
+        });
+
         var title = new TextView(this)
         {
             Text = "BARDO",
-            TextSize = 30f
+            TextSize = 30f,
+            Gravity = GravityFlags.CenterHorizontal
         };
         content.AddView(title);
 
@@ -61,6 +78,14 @@ public sealed class MainActivity : Activity
         };
         _status.SetPadding(0, 0, 0, Dp(18));
         content.AddView(_status);
+
+        _dedicatedStatus = new TextView(this)
+        {
+            Text = DedicatedModeController.GetStatus(this),
+            TextSize = 14f
+        };
+        _dedicatedStatus.SetPadding(0, 0, 0, Dp(12));
+        content.AddView(_dedicatedStatus);
 
         _relayUrl = AddField(content, "Relay del PC", settings.RelayUrl);
         _apiKey = AddField(content, "API key", settings.ApiKey);
@@ -92,6 +117,7 @@ public sealed class MainActivity : Activity
         diagnosticsButton.Click += (_, _) => ShowVoiceDiagnostics();
 
         SetContentView(root);
+        _startAfterPermission = true;
         RequestRequiredPermissions();
     }
 
@@ -110,11 +136,36 @@ public sealed class MainActivity : Activity
     protected override void OnResume()
     {
         base.OnResume();
+        DedicatedModeController.ApplyWindow(this);
+        DedicatedModeController.ApplyDeviceOwnerPolicies(this);
+        UpdateDedicatedStatus();
 
         if (BardoVoiceService.IsRunning)
         {
             SetStatus(BardoVoiceService.CurrentStatus);
         }
+        else if (!_autoStartAttempted &&
+                 CheckSelfPermission(Android.Manifest.Permission.RecordAudio) == Permission.Granted)
+        {
+            _autoStartAttempted = true;
+            _startAfterPermission = false;
+            _ = StartListeningAsync();
+        }
+    }
+
+    public override void OnWindowFocusChanged(bool hasFocus)
+    {
+        base.OnWindowFocusChanged(hasFocus);
+        if (hasFocus)
+        {
+            DedicatedModeController.ApplyWindow(this);
+        }
+    }
+
+    public override void OnBackPressed()
+    {
+        // Bardo es el terminal principal del dispositivo. El mantenimiento se hace
+        // desde sus propios controles o mediante ADB, no abandonando la aplicación.
     }
 
     private void OnVoiceStatusChanged(string status)
@@ -180,9 +231,10 @@ public sealed class MainActivity : Activity
             ? "sin señal"
             : $"{BardoVoiceService.LastRmsDb:0.0} dB";
         var recognizerEvent = BardoVoiceService.LastRecognizerEvent;
+        var dedicatedMode = DedicatedModeController.GetStatus(this);
 
         SetStatus(
-            $"Micro={microphoneGranted} · Voz sistema={standardAvailable} · Voz local={onDeviceAvailable} · Servicio={running} · RMS={rms} · Evento={recognizerEvent} · {serviceStatus}");
+            $"Micro={microphoneGranted} · Voz sistema={standardAvailable} · Voz local={onDeviceAvailable} · Servicio={running} · RMS={rms} · Evento={recognizerEvent} · {dedicatedMode} · {serviceStatus}");
     }
 
     public override void OnRequestPermissionsResult(
@@ -201,6 +253,7 @@ public sealed class MainActivity : Activity
 
         if (CheckSelfPermission(Android.Manifest.Permission.RecordAudio) == Permission.Granted)
         {
+            _autoStartAttempted = true;
             _ = StartListeningAsync();
         }
         else
@@ -301,6 +354,14 @@ public sealed class MainActivity : Activity
         if (_status is not null)
         {
             _status.Text = $"Estado: {text}";
+        }
+    }
+
+    private void UpdateDedicatedStatus()
+    {
+        if (_dedicatedStatus is not null)
+        {
+            _dedicatedStatus.Text = DedicatedModeController.GetStatus(this);
         }
     }
 
