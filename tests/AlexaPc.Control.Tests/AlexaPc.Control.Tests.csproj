@@ -13,5 +13,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\AlexaPc.Control\AlexaPc.Control.csproj" />
+    <ProjectReference Include="..\..\src\AlexaPc.Agent\AlexaPc.Agent.csproj" />
   </ItemGroup>
 </Project>

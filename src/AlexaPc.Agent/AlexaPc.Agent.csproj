@@ -18,4 +18,8 @@
   <ItemGroup>
     <ProjectReference Include="..\AlexaPc.Control\AlexaPc.Control.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AlexaPc.Control.Tests" />
+  </ItemGroup>
 </Project>

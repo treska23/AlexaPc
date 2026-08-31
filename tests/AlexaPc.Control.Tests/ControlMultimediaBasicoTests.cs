@@ -98,7 +98,7 @@ public sealed class ControlMultimediaBasicoTests
         ResultadoPasoControl paso =
             Assert.Single(resultado.Pasos);
         Assert.Equal(
-            "ControlPCIA.exe media pause --app 'spotify'",
+            "media pause --app 'spotify'",
             paso.Comando);
         Assert.True(
             ValidadorPowerShell.Validar(
@@ -135,5 +135,43 @@ public sealed class ControlMultimediaBasicoTests
         Assert.Equal(
             "Spotify no admite detener esta sesión.",
             resultado.Mensaje);
+    }
+
+    [Fact]
+    public async Task Ejecuta_multimedia_dentro_del_proceso()
+    {
+        IReadOnlyList<string>? recibidos = null;
+        DependenciasControlBasico dependencias = new(
+            _ => Task.FromResult<
+                IReadOnlyList<AplicacionInstalada>>([]),
+            (_, _) =>
+                throw new InvalidOperationException(
+                    "No debe lanzar el ejecutable externo."),
+            null,
+            null,
+            (argumentos, _) =>
+            {
+                recibidos = argumentos.ToArray();
+                return Task.FromResult(
+                    new ResultadoEjecucionPowerShell(
+                        true,
+                        0,
+                        """
+                        {"correcto":true,"detalle":"Reproducción pausada."}
+                        """,
+                        string.Empty));
+            });
+
+        ResultadoControl resultado =
+            await ControlBasico.ControlarConDependenciasAsync(
+                "pausa Spotify",
+                false,
+                dependencias,
+                TestContext.Current.CancellationToken);
+
+        Assert.True(resultado.Completado);
+        Assert.Equal(
+            ["pause", "--app", "spotify"],
+            recibidos);
     }
 }

@@ -233,7 +233,7 @@ internal static class ControlMultimediaBasico
         CancellationToken cancellationToken)
     {
         string comando =
-            "ControlPCIA.exe media "
+            "media "
             + peticion.Objetivo;
 
         if (soloTraducir)
@@ -254,10 +254,24 @@ internal static class ControlMultimediaBasico
                 false);
         }
 
-        ResultadoEjecucionPowerShell ejecucion =
-            await dependencias.EjecutarAsync(
-                comando,
-                cancellationToken);
+        ResultadoEjecucionPowerShell ejecucion;
+        if (dependencias.EjecutarMultimediaAsync is not null)
+        {
+            IReadOnlyList<string> argumentos =
+                ControlBasico.DividirArgumentosIntegrados(
+                    peticion.Objetivo);
+            ejecucion =
+                await dependencias.EjecutarMultimediaAsync(
+                    argumentos,
+                    cancellationToken);
+        }
+        else
+        {
+            ejecucion =
+                await dependencias.EjecutarAsync(
+                    comando,
+                    cancellationToken);
+        }
         ResultadoPasoControl paso = new(
             1,
             comando,

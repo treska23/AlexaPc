@@ -166,7 +166,7 @@ internal static class ComandoPantallas
         if (argumentos.Count == 0)
         {
             error =
-                "Uso: ControlPCIA.exe display list|modes|primary|resolution|frequency|scale|enable|disable|topology|orientation|position|place.";
+                "Uso: display list|modes|primary|resolution|frequency|scale|enable|disable|topology|orientation|position|place.";
             return false;
         }
 

@@ -324,7 +324,7 @@ internal static class ControlPantallasBasico
         CancellationToken cancellationToken)
     {
         string comando =
-            "ControlPCIA.exe display "
+            "display "
             + peticion.Objetivo;
 
         if (soloTraducir)
@@ -345,10 +345,26 @@ internal static class ControlPantallasBasico
                 false);
         }
 
-        ResultadoEjecucionPowerShell ejecucion =
-            await dependencias.EjecutarAsync(
-                comando,
-                cancellationToken);
+        ResultadoEjecucionPowerShell ejecucion;
+        if (dependencias.EjecutarPantallasAsync is not null)
+        {
+            string[] argumentos =
+                peticion.Objetivo.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries
+                    | StringSplitOptions.TrimEntries);
+            ejecucion =
+                await dependencias.EjecutarPantallasAsync(
+                    argumentos,
+                    cancellationToken);
+        }
+        else
+        {
+            ejecucion =
+                await dependencias.EjecutarAsync(
+                    comando,
+                    cancellationToken);
+        }
         ResultadoPasoControl paso = new(
             1,
             comando,

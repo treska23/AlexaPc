@@ -8,31 +8,31 @@ public sealed class ControlVentanasBasicoTests
     {
         {
             "trae la calculadora al frente",
-            "ControlPCIA.exe window --match 'calculadora' --foreground"
+            "window --match 'calculadora' --foreground"
         },
         {
             "pon Microsoft Edge en primer plano",
-            "ControlPCIA.exe window --match 'microsoft edge' --foreground"
+            "window --match 'microsoft edge' --foreground"
         },
         {
             "maximiza Visual Studio",
-            "ControlPCIA.exe window --match 'visual studio' --state maximized --foreground"
+            "window --match 'visual studio' --state maximized --foreground"
         },
         {
             "minimiza Cubase",
-            "ControlPCIA.exe window --match 'cubase' --state minimized"
+            "window --match 'cubase' --state minimized"
         },
         {
             "restaura la calculadora",
-            "ControlPCIA.exe window --match 'calculadora' --state normal --foreground"
+            "window --match 'calculadora' --state normal --foreground"
         },
         {
             "cierra Visual Studio",
-            "ControlPCIA.exe window --match 'visual studio' --close"
+            "window --match 'visual studio' --close"
         },
         {
             "coloca Edge en x 0 y 20 ancho 1920 alto 1060",
-            "ControlPCIA.exe window --match 'edge' --x 0 --y 20 --width 1920 --height 1060 --foreground"
+            "window --match 'edge' --x 0 --y 20 --width 1920 --height 1060 --foreground"
         }
     };
 
@@ -99,6 +99,43 @@ public sealed class ControlVentanasBasicoTests
             "guardar trabajo",
             resultado.Mensaje,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Ejecuta_las_ventanas_dentro_del_proceso()
+    {
+        IReadOnlyList<string>? recibidos = null;
+        DependenciasControlBasico dependencias = new(
+            _ => Task.FromResult<
+                IReadOnlyList<AplicacionInstalada>>([]),
+            (_, _) =>
+                throw new InvalidOperationException(
+                    "No debe lanzar el ejecutable externo."),
+            null,
+            (argumentos, _) =>
+            {
+                recibidos = argumentos.ToArray();
+                return Task.FromResult(
+                    new ResultadoEjecucionPowerShell(
+                        true,
+                        0,
+                        """
+                        {"correcto":true,"detalle":"Ventana maximizada."}
+                        """,
+                        string.Empty));
+            });
+
+        ResultadoControl resultado =
+            await ControlBasico.ControlarConDependenciasAsync(
+                "maximiza Visual Studio",
+                false,
+                dependencias,
+                TestContext.Current.CancellationToken);
+
+        Assert.True(resultado.Completado);
+        Assert.Equal(
+            ["--match", "visual studio", "--state", "maximized", "--foreground"],
+            recibidos);
     }
 
     [Fact]

@@ -33,7 +33,22 @@ internal sealed record DependenciasControlBasico(
         string,
         CancellationToken,
         Task<ResultadoEjecucionPowerShell>>
-        EjecutarAsync);
+        EjecutarAsync,
+    Func<
+        IReadOnlyList<string>,
+        CancellationToken,
+        Task<ResultadoEjecucionPowerShell>>?
+        EjecutarPantallasAsync = null,
+    Func<
+        IReadOnlyList<string>,
+        CancellationToken,
+        Task<ResultadoEjecucionPowerShell>>?
+        EjecutarVentanasAsync = null,
+    Func<
+        IReadOnlyList<string>,
+        CancellationToken,
+        Task<ResultadoEjecucionPowerShell>>?
+        EjecutarMultimediaAsync = null);
 
 /// <summary>
 /// Núcleo estable de ControlPCIA. No consulta a un modelo. Traduce primero
@@ -94,13 +109,146 @@ internal static class ControlBasico
             static (comando, cancelacion) =>
                 EjecutorPowerShell.EjecutarAsync(
                     comando,
-                    cancelacion));
+                    cancelacion),
+            EjecutarPantallasIntegradoAsync,
+            EjecutarVentanasIntegradoAsync,
+            EjecutarMultimediaIntegradoAsync);
 
         return ControlarConDependenciasAsync(
             instruccion,
             soloTraducir,
             dependencias,
             cancellationToken);
+    }
+
+    internal static async Task<ResultadoEjecucionPowerShell>
+        EjecutarPantallasIntegradoAsync(
+            IReadOnlyList<string> argumentos,
+            CancellationToken cancellationToken)
+    {
+        return await EjecutarIntegradoAsync(
+            (salida, error) =>
+                ComandoPantallas.EjecutarAsync(
+                    argumentos,
+                    salida,
+                    error),
+            cancellationToken);
+    }
+
+    internal static async Task<ResultadoEjecucionPowerShell>
+        EjecutarVentanasIntegradoAsync(
+            IReadOnlyList<string> argumentos,
+            CancellationToken cancellationToken)
+    {
+        return await EjecutarIntegradoAsync(
+            (salida, error) =>
+                ComandoVentanas.EjecutarAsync(
+                    argumentos,
+                    salida,
+                    error,
+                    cancellationToken),
+            cancellationToken);
+    }
+
+    internal static async Task<ResultadoEjecucionPowerShell>
+        EjecutarMultimediaIntegradoAsync(
+            IReadOnlyList<string> argumentos,
+            CancellationToken cancellationToken)
+    {
+        return await EjecutarIntegradoAsync(
+            (salida, error) =>
+                ComandoMultimedia.EjecutarAsync(
+                    argumentos,
+                    salida,
+                    error),
+            cancellationToken);
+    }
+
+    private static async Task<ResultadoEjecucionPowerShell>
+        EjecutarIntegradoAsync(
+            Func<TextWriter, TextWriter, Task<int>> ejecutarAsync,
+            CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var salida = new StringWriter(
+            CultureInfo.InvariantCulture);
+        using var error = new StringWriter(
+            CultureInfo.InvariantCulture);
+
+        int codigo = await ejecutarAsync(
+            salida,
+            error);
+
+        cancellationToken.ThrowIfCancellationRequested();
+        return new ResultadoEjecucionPowerShell(
+            true,
+            codigo,
+            salida.ToString().Trim(),
+            error.ToString().Trim());
+    }
+
+    internal static IReadOnlyList<string>
+        DividirArgumentosIntegrados(string texto)
+    {
+        var argumentos = new List<string>();
+        var actual = new StringBuilder();
+        char? comilla = null;
+
+        for (int indice = 0; indice < texto.Length; indice++)
+        {
+            char caracter = texto[indice];
+            if (comilla is not null)
+            {
+                if (caracter == comilla)
+                {
+                    if (comilla == '\''
+                        && indice + 1 < texto.Length
+                        && texto[indice + 1] == '\'')
+                    {
+                        actual.Append('\'');
+                        indice++;
+                    }
+                    else
+                    {
+                        comilla = null;
+                    }
+                }
+                else
+                {
+                    actual.Append(caracter);
+                }
+
+                continue;
+            }
+
+            if (caracter is '\'' or '"')
+            {
+                comilla = caracter;
+            }
+            else if (char.IsWhiteSpace(caracter))
+            {
+                AgregarArgumento();
+            }
+            else
+            {
+                actual.Append(caracter);
+            }
+        }
+
+        AgregarArgumento();
+        return argumentos;
+
+        void AgregarArgumento()
+        {
+            if (actual.Length == 0)
+            {
+                return;
+            }
+
+            argumentos.Add(actual.ToString());
+            actual.Clear();
+        }
     }
 
     internal static async Task<ResultadoControl>

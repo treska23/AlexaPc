@@ -141,10 +141,10 @@ public sealed class ControlMultiaccionBasicoTests
 
         Assert.Equal(2, resultado.Pasos.Count);
         Assert.Equal(
-            "ControlPCIA.exe display primary 3",
+            "display primary 3",
             resultado.Pasos[0].Comando);
         Assert.Equal(
-            "ControlPCIA.exe display resolution 3 1920 1080",
+            "display resolution 3 1920 1080",
             resultado.Pasos[1].Comando);
     }
 

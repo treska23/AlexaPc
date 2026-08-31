@@ -5,8 +5,8 @@ using System.Text.RegularExpressions;
 namespace ControlPCIA;
 
 /// <summary>
-/// Traduce órdenes naturales sobre ventanas superiores al comando de consola
-/// propio de ControlPCIA. No usa capturas, OCR, ratón ni teclado.
+/// Traduce órdenes naturales sobre ventanas superiores al controlador Win32
+/// integrado. No usa capturas, OCR, ratón ni teclado.
 /// </summary>
 internal static class ControlVentanasBasico
 {
@@ -158,7 +158,7 @@ internal static class ControlVentanasBasico
         CancellationToken cancellationToken)
     {
         string comando =
-            "ControlPCIA.exe window --match "
+            "window --match "
             + EscaparLiteralPowerShell(
                 peticion.Objetivo)
             + " "
@@ -182,10 +182,30 @@ internal static class ControlVentanasBasico
                 false);
         }
 
-        ResultadoEjecucionPowerShell ejecucion =
-            await dependencias.EjecutarAsync(
-                comando,
-                cancellationToken);
+        ResultadoEjecucionPowerShell ejecucion;
+        if (dependencias.EjecutarVentanasAsync is not null)
+        {
+            string[] argumentos =
+            [
+                "--match",
+                peticion.Objetivo,
+                .. peticion.Motivo.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries
+                    | StringSplitOptions.TrimEntries)
+            ];
+            ejecucion =
+                await dependencias.EjecutarVentanasAsync(
+                    argumentos,
+                    cancellationToken);
+        }
+        else
+        {
+            ejecucion =
+                await dependencias.EjecutarAsync(
+                    comando,
+                    cancellationToken);
+        }
         ResultadoPasoControl paso = new(
             1,
             comando,

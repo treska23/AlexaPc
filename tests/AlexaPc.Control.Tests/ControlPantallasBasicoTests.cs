@@ -67,6 +67,10 @@ public sealed class ControlPantallasBasicoTests
             "topology extend"
         },
         {
+            "extiende la imagen a todas las pantallas",
+            "topology extend"
+        },
+        {
             "usa solo la pantalla del PC",
             "topology internal"
         },
@@ -138,13 +142,52 @@ public sealed class ControlPantallasBasicoTests
         ResultadoPasoControl paso =
             Assert.Single(resultado.Pasos);
         Assert.Equal(
-            "ControlPCIA.exe display primary 2",
+            "display primary 2",
             paso.Comando);
         Assert.False(paso.Ejecutado);
         Assert.True(
             ValidadorPowerShell.Validar(
                     paso.Comando)
                 .Permitido);
+    }
+
+    [Fact]
+    public async Task Ejecuta_la_configuracion_de_pantallas_dentro_del_proceso()
+    {
+        IReadOnlyList<string>? recibidos = null;
+        DependenciasControlBasico dependencias = new(
+            _ => Task.FromResult<
+                IReadOnlyList<AplicacionInstalada>>([]),
+            (_, _) =>
+                throw new InvalidOperationException(
+                    "No debe lanzar el ejecutable externo."),
+            (argumentos, _) =>
+            {
+                recibidos = argumentos.ToArray();
+                return Task.FromResult(
+                    new ResultadoEjecucionPowerShell(
+                        true,
+                        0,
+                        """
+                        {"correcto":true,"detalle":"Windows aceptó el escritorio extendido."}
+                        """,
+                        string.Empty));
+            });
+
+        ResultadoControl resultado =
+            await ControlBasico.ControlarConDependenciasAsync(
+                "extiende la imagen a todas las pantallas",
+                false,
+                dependencias,
+                TestContext.Current.CancellationToken);
+
+        Assert.True(resultado.Completado);
+        Assert.Equal(
+            ["topology", "extend"],
+            recibidos);
+        Assert.Equal(
+            "Windows aceptó el escritorio extendido.",
+            resultado.Mensaje);
     }
 
     [Fact]

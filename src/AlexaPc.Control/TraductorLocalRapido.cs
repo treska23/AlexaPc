@@ -65,11 +65,6 @@ internal static class TraductorLocalRapido
         real, usa proponer_consulta para investigarla o preguntar_usuario. Crear una
         carpeta normal sí puede hacerse con New-Item una vez resuelta su ruta real.
 
-        Comandos propios disponibles:
-        - ControlPCIA.exe display list|modes|primary|resolution|frequency|scale|enable|disable|topology|orientation|position|place
-        - ControlPCIA.exe window --match 'texto' [--list|--foreground|--state normal|maximized|minimized|--close|--x N --y N --width N --height N]
-        - ControlPCIA.exe media status|play|pause|toggle|stop|next|previous|forward|rewind|seek|shuffle|repeat|rate|fullscreen|exit-fullscreen [--app nombre]
-
         Devuelve comandos completos, no explicaciones alrededor del comando.
         """;
 

@@ -187,7 +187,7 @@ internal static class ComandoMultimedia
         if (argumentos.Count == 0)
         {
             error =
-                "Uso: ControlPCIA.exe media list|status|play|pause|toggle|stop|next|previous|forward|rewind|seek|shuffle|repeat|rate|fullscreen|exit-fullscreen [--app aplicación].";
+                "Uso: media list|status|play|pause|toggle|stop|next|previous|forward|rewind|seek|shuffle|repeat|rate|fullscreen|exit-fullscreen [--app aplicación].";
             return false;
         }
 

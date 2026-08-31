@@ -43,7 +43,7 @@ public sealed class GeneralComputerControlService
                 durationMs = Environment.TickCount64 - startedAt
             });
 
-            var message = NormalizeSpokenMessage(result.Message);
+            var message = NormalizeSpokenMessage(result);
             return message.Length > 0
                 ? CommandResult.Ok(SpokenPrefix + message)
                 : CommandResult.Fail("El controlador general no devolvió una respuesta.");
@@ -96,8 +96,16 @@ public sealed class GeneralComputerControlService
                || normalized.Contains("bloque", StringComparison.Ordinal);
     }
 
-    private static string NormalizeSpokenMessage(string message)
+    internal static string NormalizeSpokenMessage(
+        GeneralControlResult result)
     {
+        string message = result.Message ?? string.Empty;
+        if (LooksLikeTechnicalOutput(message)
+            || (!result.Completed && message.Length > 280))
+        {
+            return FriendlyFailureMessage(result.State);
+        }
+
         var normalized = string.Join(
             " ",
             message
@@ -106,9 +114,46 @@ public sealed class GeneralComputerControlService
                 .Select(line => line.TrimStart('-', '•').Trim())
                 .Where(line => line.Length > 0));
 
-        const int maximumSpokenLength = 700;
+        const int maximumSpokenLength = 420;
         return normalized.Length <= maximumSpokenLength
             ? normalized
             : normalized[..maximumSpokenLength].TrimEnd() + "…";
+    }
+
+    private static bool LooksLikeTechnicalOutput(string message)
+    {
+        string[] markers =
+        [
+            "ControlPCIA.exe",
+            "PowerShell",
+            "CommandNotFoundException",
+            "FullyQualifiedErrorId",
+            "System.Management.Automation",
+            "Start-Process",
+            "ConvertTo-Json",
+            "En línea:",
+            "At line:",
+            "$_.",
+            " | "
+        ];
+
+        return markers.Any(marker =>
+            message.Contains(
+                marker,
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string FriendlyFailureMessage(string state)
+    {
+        return state switch
+        {
+            "error_configuracion_pantallas" =>
+                "No he podido cambiar la configuración de las pantallas.",
+            "comando_no_disponible" =>
+                "Esa orden todavía no está disponible.",
+            "aplicacion_no_encontrada" =>
+                "No encuentro esa aplicación instalada.",
+            _ => "No he podido completar la orden."
+        };
     }
 }
