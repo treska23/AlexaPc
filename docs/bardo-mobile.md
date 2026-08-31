@@ -8,7 +8,7 @@ El recorrido actual es:
 
 ```text
 "Bardo"
-   -> reconocimiento local Moonshine ES
+   -> reconocimiento local de Android
    -> comando hablado
    -> HTTP local
    -> AlexaPc.Relay
@@ -32,7 +32,7 @@ Al oír `Bardo`, el servicio entra en modo comando y escucha la siguiente frase.
 - Visual Studio 2026.
 - .NET 10.
 - workload de .NET para Android instalado.
-- Android 8.0 o posterior en el teléfono.
+- Android 12 o posterior en el teléfono, con reconocimiento de voz local disponible.
 - El teléfono y el PC en la misma red local.
 
 ## Configuración inicial
@@ -92,7 +92,7 @@ La aplicación incluye:
 - actividad `HOME`, para poder sustituir el lanzador de Android;
 - funcionamiento de voz con la pantalla apagada, sin encenderla al reconocer `Bardo`;
 - confirmación sonora inmediata al reconocer `Bardo`, que indica cuándo decir la orden;
-- reconocimiento local Moonshine ES para la palabra `Bardo` y Whisper multilingüe `base` cuantizado para entender mejor las órdenes completas, sin enviar la voz a Google ni a ningún servidor;
+- reconocimiento local del propio Android para la palabra `Bardo` y las órdenes, con resultados parciales y prioridad explícita para la palabra de activación;
 - bloqueos de CPU y Wi-Fi mientras escucha;
 - servicio de voz permanente con notificación;
 - administración del dispositivo y modo quiosco preparados.
@@ -102,9 +102,9 @@ En el OPPO de desarrollo se ha aplicado además una configuración reversible:
 - Bardo es la aplicación de inicio predeterminada;
 - Bardo está excluido de la suspensión de batería de Android;
 - el asistente de Google está desactivado para que no compita por el micrófono ni por el botón de asistente;
-- el servicio de reconocimiento de voz de Android continúa instalado, aunque Bardo ya no depende de él.
+- el servicio de reconocimiento de voz local de Android continúa instalado y es el motor ligero que usa Bardo.
 
-Esto hace que Bardo sustituya **en la práctica** a `OK Google` en el teléfono dedicado. No convierte todavía a Bardo en un servicio de hotword integrado en el DSP del fabricante: la versión actual mantiene ciclos de captura local con Moonshine ES y tolera variantes de transcripción cercanas como `Vardo`, `Pardo` o `Borde`.
+Esto hace que Bardo sustituya **en la práctica** a `OK Google` en el teléfono dedicado. No convierte todavía a Bardo en un servicio de hotword integrado en el DSP del fabricante: la versión actual mantiene sesiones consecutivas del reconocedor local de Android, reacciona a resultados parciales y tolera variantes de transcripción cercanas como `Vardo`, `Pardo` o `Borde`.
 
 La pantalla puede permanecer apagada. El servicio de primer plano reserva CPU y Wi-Fi y mantiene los ciclos del micrófono sin adquirir ningún bloqueo de pantalla. Al reconocer `Bardo`, reproduce un tono corto, abre una sesión nueva para la orden y la envía al PC sin iluminar el panel. Si el reconocedor repite la palabra `Bardo` al principio de la orden, la aplicación la elimina antes de enviarla. Su canal de notificación no usa sonido, vibración ni luz. La fiabilidad absoluta después de reinicios o cierres forzosos del fabricante requiere el aprovisionamiento como propietario del dispositivo descrito a continuación.
 
@@ -143,6 +143,6 @@ Esta integración se hará después de validar la versión actual de Bardo con l
 
 ## Estado técnico
 
-La versión actual utiliza Moonshine ES mediante sherpa-onnx para la activación permanente y Whisper `base` cuantizado para las órdenes. Si Whisper aún se está preparando o no puede cargarse, Moonshine continúa como respaldo. Todo el reconocimiento se ejecuta en el OPPO. Ya valida el recorrido teléfono -> relay -> agente -> ControlPCIA -> Windows, la transición `Bardo` -> orden y el envío Wake-on-LAN al PC.
+La versión actual utiliza el reconocedor local de Android tanto para la activación como para las órdenes. Los resultados parciales permiten confirmar `Bardo` antes de que termine la sesión completa, y el sesgo de vocabulario da prioridad al nombre del asistente. Ya valida el recorrido teléfono -> relay -> agente -> ControlPCIA -> Windows, la transición `Bardo` -> orden y el envío Wake-on-LAN al PC.
 
 Las siguientes mejoras previstas son la ruta de Alexa, respuesta hablada y estado del PC en la pantalla del teléfono.

@@ -226,7 +226,7 @@ public sealed class MainActivity : Activity
     {
         bool microphoneGranted =
             CheckSelfPermission(Android.Manifest.Permission.RecordAudio) == Permission.Granted;
-        bool modelInstalled = LocalSpeechModelManager.IsInstalled(this);
+        bool recognizerAvailable = AndroidSpeechEngine.IsAvailable(this);
         bool running = BardoVoiceService.IsRunning;
         bool engineReady = BardoVoiceService.LocalEngineReady;
         string serviceStatus = BardoVoiceService.CurrentStatus;
@@ -238,7 +238,7 @@ public sealed class MainActivity : Activity
         string pcMac = BardoSettingsStore.Load(this).PcMacAddress;
 
         SetStatus(
-            $"Micro={microphoneGranted} · ModeloES={modelInstalled} · MotorLocal={engineReady} · Servicio={running} · RMS={rms} · MAC-PC={(string.IsNullOrWhiteSpace(pcMac) ? "pendiente" : pcMac)} · Evento={recognizerEvent} · {dedicatedMode} · {serviceStatus}");
+            $"Micro={microphoneGranted} · VozAndroid={recognizerAvailable} · MotorLocal={engineReady} · Servicio={running} · RMS={rms} · MAC-PC={(string.IsNullOrWhiteSpace(pcMac) ? "pendiente" : pcMac)} · Evento={recognizerEvent} · {dedicatedMode} · {serviceStatus}");
     }
 
     public override void OnRequestPermissionsResult(

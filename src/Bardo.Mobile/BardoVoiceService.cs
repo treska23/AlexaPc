@@ -28,9 +28,7 @@ public sealed class BardoVoiceService : Service
     private PowerManager.WakeLock? _cpuWakeLock;
     private WifiManager.WifiLock? _wifiLock;
     private ToneGenerator? _feedbackTone;
-    private LocalSpeechEngine? _localEngine;
-    private Task? _voiceLoopTask;
-    private Task? _improvedRecognitionPreparation;
+    private AndroidSpeechEngine? _speechEngine;
     private BardoSettings _settings = BardoSettings.Default;
     private bool _destroyed;
     private bool _commandInFlight;
@@ -54,10 +52,27 @@ public sealed class BardoVoiceService : Service
         try
         {
             _settings = BardoSettingsStore.Load(this);
+            LegacyLocalSpeechModelCleaner.Clean(this);
             CreateNotificationChannel();
-            StartAsForeground("Preparando voz local…");
+            StartAsForeground("Preparando voz local de Android…");
             AcquireDedicatedResourceLocks();
-            StartVoiceLoop();
+
+            LocalEngineReady = AndroidSpeechEngine.IsAvailable(this);
+            if (!LocalEngineReady)
+            {
+                SetServiceStatus("El reconocimiento local de Android no está disponible");
+                return;
+            }
+
+            _speechEngine = new AndroidSpeechEngine(
+                this,
+                settingsProvider: () => BardoSettingsStore.Load(this),
+                executeCommand: ExecuteCommandAndResumeAsync,
+                playWakeAcknowledgement: PlayWakeAcknowledgement,
+                setStatus: SetServiceStatus,
+                setEvent: message => LastRecognizerEvent = message,
+                setRms: rms => LastRmsDb = rms);
+            _speechEngine.Start();
         }
         catch (Exception ex)
         {
@@ -77,10 +92,7 @@ public sealed class BardoVoiceService : Service
         }
 
         _settings = BardoSettingsStore.Load(this);
-        if (_voiceLoopTask is null || _voiceLoopTask.IsCompleted)
-        {
-            StartVoiceLoop();
-        }
+        _speechEngine?.Start();
 
         return StartCommandResult.Sticky;
     }
@@ -99,188 +111,18 @@ public sealed class BardoVoiceService : Service
         _shutdown.Cancel();
         try
         {
-            _localEngine?.Dispose();
+            _speechEngine?.Dispose();
         }
         catch (Exception ex)
         {
-            Log.Warn(LogTag, $"Error cerrando motor local: {ex.Message}");
+            Log.Warn(LogTag, $"Error cerrando voz de Android: {ex.Message}");
         }
-        _localEngine = null;
+        _speechEngine = null;
 
         ReleaseFeedbackTone();
         ReleaseDedicatedResourceLocks();
         _shutdown.Dispose();
         base.OnDestroy();
-    }
-
-    private void StartVoiceLoop()
-    {
-        if (_destroyed || (_voiceLoopTask is { IsCompleted: false }))
-        {
-            return;
-        }
-
-        _voiceLoopTask = RunVoiceLoopAsync(_shutdown.Token);
-    }
-
-    private async Task RunVoiceLoopAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            SetServiceStatus(LocalSpeechModelManager.IsInstalled(this)
-                ? "Cargando voz española local…"
-                : "Primera instalación · descargando voz española local…");
-
-            _localEngine = await LocalSpeechEngine.CreateAsync(
-                this,
-                message =>
-                {
-                    LastRecognizerEvent = message;
-                    SetServiceStatus(message);
-                },
-                cancellationToken).ConfigureAwait(false);
-
-            LocalEngineReady = true;
-            LastRecognizerEvent = "motor local listo";
-            SetWaitingStatus();
-            _improvedRecognitionPreparation = PrepareImprovedRecognitionAsync(
-                _localEngine,
-                cancellationToken);
-
-            while (!cancellationToken.IsCancellationRequested && !_destroyed)
-            {
-                _settings = BardoSettingsStore.Load(this);
-
-                LocalSpeechUtterance? wakeCandidate = await _localEngine.ListenForUtteranceAsync(
-                    timeout: null,
-                    maximumUtterance: TimeSpan.FromSeconds(3.2),
-                    rmsChanged: rms => LastRmsDb = rms,
-                    eventChanged: message => LastRecognizerEvent = $"Wake · {message}",
-                    cancellationToken).ConfigureAwait(false);
-
-                if (wakeCandidate is null)
-                {
-                    continue;
-                }
-
-                LastRecognizerEvent = $"Wake · «{wakeCandidate.Text}»";
-                Log.Info(LogTag, $"Wake local candidate: {wakeCandidate.Text}");
-
-                if (!WakeWordMatcher.Matches(wakeCandidate.Text, _settings.WakeWord))
-                {
-                    continue;
-                }
-
-                string inlineCommand = WakeWordMatcher.ExtractCommandAfterWakeWord(
-                    wakeCandidate.Text,
-                    _settings.WakeWord);
-
-                PlayWakeAcknowledgement();
-                Log.Info(LogTag, $"Wake local detectada: {wakeCandidate.Text}");
-
-                if (!string.IsNullOrWhiteSpace(inlineCommand))
-                {
-                    await ExecuteCommandAndResumeAsync(inlineCommand, cancellationToken).ConfigureAwait(false);
-                    SetWaitingStatus();
-                    continue;
-                }
-
-                SetServiceStatus("Bardo detectado · habla ahora");
-
-                // El tono dura 180 ms. Esperamos a que termine para que AudioRecord no
-                // se escuche a sí mismo y corte la primera sílaba de la orden.
-                await Task.Delay(220, cancellationToken).ConfigureAwait(false);
-
-                string? command = await ListenForCommandAsync(cancellationToken).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(command))
-                {
-                    SetServiceStatus("No te he oído · habla ahora");
-                    await Task.Delay(180, cancellationToken).ConfigureAwait(false);
-                    command = await ListenForCommandAsync(cancellationToken).ConfigureAwait(false);
-                }
-
-                if (string.IsNullOrWhiteSpace(command))
-                {
-                    SetServiceStatus("No he entendido la orden");
-                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
-                    SetWaitingStatus();
-                    continue;
-                }
-
-                await ExecuteCommandAndResumeAsync(command, cancellationToken).ConfigureAwait(false);
-                SetWaitingStatus();
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Cierre normal del servicio.
-        }
-        catch (Exception ex)
-        {
-            LocalEngineReady = false;
-            LastRecognizerEvent = $"motor local: {ex.GetType().Name}: {ex.Message}";
-            Log.Error(LogTag, $"Motor local detenido por error: {ex}");
-            SetServiceStatus($"Error de voz local · {ex.Message}");
-        }
-    }
-
-    private async Task<string?> ListenForCommandAsync(CancellationToken cancellationToken)
-    {
-        if (_localEngine is null)
-        {
-            return null;
-        }
-
-        bool useWhisper = _localEngine.ImprovedCommandRecognitionReady;
-        SetServiceStatus(useWhisper
-            ? "Bardo · habla ahora · Whisper español"
-            : "Bardo · habla ahora · Moonshine español");
-
-        LocalSpeechUtterance? utterance = await _localEngine.ListenForUtteranceAsync(
-            timeout: TimeSpan.FromSeconds(7),
-            maximumUtterance: TimeSpan.FromSeconds(7),
-            rmsChanged: rms => LastRmsDb = rms,
-            eventChanged: message =>
-            {
-                LastRecognizerEvent = $"Command · {message}";
-                if (message == "voz detectada por AudioRecord")
-                {
-                    SetServiceStatus("Escuchando comando…");
-                }
-            },
-            cancellationToken,
-            preferImprovedRecognizer: useWhisper).ConfigureAwait(false);
-
-        if (utterance is null)
-        {
-            return null;
-        }
-
-        string engine = useWhisper ? "Whisper" : "Moonshine";
-        LastRecognizerEvent = $"Command {engine} · «{utterance.Text}»";
-        Log.Info(LogTag, $"Comando reconocido por {engine}: {utterance.Text}");
-        return NormalizeCommand(utterance.Text);
-    }
-
-    private async Task PrepareImprovedRecognitionAsync(
-        LocalSpeechEngine engine,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await engine.PrepareImprovedCommandRecognitionAsync(
-                progress: message => Log.Info(LogTag, message),
-                cancellationToken).ConfigureAwait(false);
-            Log.Info(LogTag, "Reconocimiento mejorado de órdenes preparado");
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Cierre normal del servicio durante la descarga o la carga.
-        }
-        catch (Exception ex)
-        {
-            Log.Warn(LogTag, $"Whisper no disponible; Moonshine seguirá activo: {ex}");
-        }
     }
 
     private async Task ExecuteCommandAndResumeAsync(
@@ -451,19 +293,6 @@ public sealed class BardoVoiceService : Service
         }
 
         return normalized.Trim(' ', ',', '.', ';', ':', '¿', '?', '¡', '!');
-    }
-
-    private void SetWaitingStatus()
-    {
-        if (_destroyed)
-        {
-            return;
-        }
-
-        string commandEngine = _localEngine?.ImprovedCommandRecognitionReady == true
-            ? "órdenes Whisper ES"
-            : "órdenes Moonshine ES";
-        SetServiceStatus($"Esperando «{_settings.WakeWord}» · local · {commandEngine}");
     }
 
     private void PlayWakeAcknowledgement()

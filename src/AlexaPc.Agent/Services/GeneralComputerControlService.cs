@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Text;
 using AlexaPc.Agent.Models;
 using ControlPCIA;
 
@@ -22,6 +25,12 @@ public sealed class GeneralComputerControlService
         if (IsPowerCommand(utterance))
         {
             return null;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        if (IsDisplaySettingsCommand(utterance))
+        {
+            return OpenDisplaySettings(utterance);
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -94,6 +103,62 @@ public sealed class GeneralComputerControlService
                || normalized.Contains("reinici", StringComparison.Ordinal)
                || normalized.Contains("suspend", StringComparison.Ordinal)
                || normalized.Contains("bloque", StringComparison.Ordinal);
+    }
+
+    private CommandResult OpenDisplaySettings(string utterance)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "ms-settings:display",
+                UseShellExecute = true
+            });
+            _log.Info("display_settings_opened", new { utterance });
+            return CommandResult.Ok(SpokenPrefix + "Configuración de pantalla abierta.");
+        }
+        catch (Exception ex)
+        {
+            _log.Error("display_settings_failed", ex, new { utterance });
+            return CommandResult.Fail("No he podido abrir la configuración de pantalla.");
+        }
+    }
+
+    private static bool IsDisplaySettingsCommand(string utterance)
+    {
+        string normalized = RemoveDiacritics(utterance).ToLowerInvariant();
+        bool mentionsDisplaySettings =
+            normalized.Contains("configuracion de pantalla", StringComparison.Ordinal) ||
+            normalized.Contains("configuracion de la pantalla", StringComparison.Ordinal) ||
+            normalized.Contains("configuracion pantalla", StringComparison.Ordinal) ||
+            normalized.Contains("ajustes de pantalla", StringComparison.Ordinal) ||
+            normalized.Contains("ajustes de la pantalla", StringComparison.Ordinal) ||
+            normalized.Contains("ajustes pantalla", StringComparison.Ordinal);
+        if (!mentionsDisplaySettings)
+        {
+            return false;
+        }
+
+        string[] actionFragments =
+        [
+            "abre", "abrir", "muestra", "mostrar", "llevame", "ve a", "entra", "pon"
+        ];
+        return actionFragments.Any(action => normalized.Contains(action, StringComparison.Ordinal));
+    }
+
+    private static string RemoveDiacritics(string value)
+    {
+        string decomposed = value.Normalize(NormalizationForm.FormD);
+        var builder = new StringBuilder(decomposed.Length);
+        foreach (char character in decomposed)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(character) != UnicodeCategory.NonSpacingMark)
+            {
+                builder.Append(character);
+            }
+        }
+
+        return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
     private static string NormalizeSpokenMessage(string message)

@@ -11,6 +11,7 @@ public partial class App : System.Windows.Application
     private const string SingleInstanceMutexName = "Local\\AlexaPc.Agent.SingleInstance";
 
     private RelayClientService? _relayClient;
+    private LocalRelayProcessService? _localRelay;
     private TrayIconService? _trayIcon;
     private AppLogService? _log;
     private Mutex? _singleInstanceMutex;
@@ -55,6 +56,7 @@ public partial class App : System.Windows.Application
         relayConfigurationService.Load();
         assistantConfigurationService.Load();
         _relayClient = new RelayClientService(relayConfigurationService, dispatcher, _log);
+        _localRelay = new LocalRelayProcessService(_log);
 
         var viewModel = new MainViewModel(
             configurationService,
@@ -90,6 +92,7 @@ public partial class App : System.Windows.Application
         }
 
         new DesktopShortcutService().EnsureShortcuts();
+        _localRelay.Start();
         _relayClient.Start();
         _ = generalControlService.WarmUpAsync();
         _ = llamaService.WarmUpAsync();
@@ -108,6 +111,11 @@ public partial class App : System.Windows.Application
         if (_relayClient is not null)
         {
             _relayClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        if (_localRelay is not null)
+        {
+            _localRelay.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
 
         _trayIcon?.Dispose();
