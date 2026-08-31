@@ -18,6 +18,9 @@ public sealed class DesktopShortcutService
                 return;
             }
 
+            // Una ejecución desde Visual Studio no debe reemplazar el acceso
+            // directo ni el inicio automático configurados por la copia Release.
+#if !DEBUG
             var workingDirectory = Path.GetDirectoryName(executablePath) ?? AppContext.BaseDirectory;
             CreateShortcut(
                 Path.Combine(
@@ -28,6 +31,7 @@ public sealed class DesktopShortcutService
                 string.Empty);
 
             EnsureStartupRegistration(executablePath);
+#endif
         }
         catch
         {
