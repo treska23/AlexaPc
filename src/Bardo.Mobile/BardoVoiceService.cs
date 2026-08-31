@@ -30,6 +30,7 @@ public sealed class BardoVoiceService : Service
     private ToneGenerator? _feedbackTone;
     private LocalSpeechEngine? _localEngine;
     private Task? _voiceLoopTask;
+    private Task? _improvedRecognitionPreparation;
     private BardoSettings _settings = BardoSettings.Default;
     private bool _destroyed;
     private bool _commandInFlight;
@@ -142,6 +143,9 @@ public sealed class BardoVoiceService : Service
             LocalEngineReady = true;
             LastRecognizerEvent = "motor local listo";
             SetWaitingStatus();
+            _improvedRecognitionPreparation = PrepareImprovedRecognitionAsync(
+                _localEngine,
+                cancellationToken);
 
             while (!cancellationToken.IsCancellationRequested && !_destroyed)
             {
@@ -227,6 +231,11 @@ public sealed class BardoVoiceService : Service
             return null;
         }
 
+        bool useWhisper = _localEngine.ImprovedCommandRecognitionReady;
+        SetServiceStatus(useWhisper
+            ? "Bardo · habla ahora · Whisper español"
+            : "Bardo · habla ahora · Moonshine español");
+
         LocalSpeechUtterance? utterance = await _localEngine.ListenForUtteranceAsync(
             timeout: TimeSpan.FromSeconds(7),
             maximumUtterance: TimeSpan.FromSeconds(7),
@@ -239,15 +248,39 @@ public sealed class BardoVoiceService : Service
                     SetServiceStatus("Escuchando comando…");
                 }
             },
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            preferImprovedRecognizer: useWhisper).ConfigureAwait(false);
 
         if (utterance is null)
         {
             return null;
         }
 
-        LastRecognizerEvent = $"Command · «{utterance.Text}»";
+        string engine = useWhisper ? "Whisper" : "Moonshine";
+        LastRecognizerEvent = $"Command {engine} · «{utterance.Text}»";
+        Log.Info(LogTag, $"Comando reconocido por {engine}: {utterance.Text}");
         return NormalizeCommand(utterance.Text);
+    }
+
+    private async Task PrepareImprovedRecognitionAsync(
+        LocalSpeechEngine engine,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await engine.PrepareImprovedCommandRecognitionAsync(
+                progress: message => Log.Info(LogTag, message),
+                cancellationToken).ConfigureAwait(false);
+            Log.Info(LogTag, "Reconocimiento mejorado de órdenes preparado");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cierre normal del servicio durante la descarga o la carga.
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"Whisper no disponible; Moonshine seguirá activo: {ex}");
+        }
     }
 
     private async Task ExecuteCommandAndResumeAsync(
@@ -427,7 +460,10 @@ public sealed class BardoVoiceService : Service
             return;
         }
 
-        SetServiceStatus($"Esperando «{_settings.WakeWord}» · local Moonshine ES");
+        string commandEngine = _localEngine?.ImprovedCommandRecognitionReady == true
+            ? "órdenes Whisper ES"
+            : "órdenes Moonshine ES";
+        SetServiceStatus($"Esperando «{_settings.WakeWord}» · local · {commandEngine}");
     }
 
     private void PlayWakeAcknowledgement()

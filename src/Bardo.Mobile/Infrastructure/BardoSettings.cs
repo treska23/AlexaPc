@@ -9,12 +9,14 @@ internal sealed record BardoSettings(
     string WakeWord,
     string PcMacAddress)
 {
+    public const string PrimaryPcMacAddress = "D8:BB:C1:58:13:F8";
+
     public static BardoSettings Default { get; } = new(
         "http://192.168.1.2:5184",
         "dev-api-key",
         "pc-principal",
         "bardo",
-        string.Empty);
+        PrimaryPcMacAddress);
 }
 
 internal static class BardoSettingsStore
@@ -30,13 +32,25 @@ internal static class BardoSettingsStore
     {
         var preferences = context.GetSharedPreferences(PreferencesName, FileCreationMode.Private);
         var defaults = BardoSettings.Default;
+        string? storedPcMacAddress = preferences?.GetString(PcMacAddressKey, null);
+        string pcMacAddress = WakeOnLanClient.IsValidMac(storedPcMacAddress)
+            ? WakeOnLanClient.NormalizeMac(storedPcMacAddress!)
+            : defaults.PcMacAddress;
+
+        // Las versiones anteriores podían haber guardado una cadena vacía. En ese
+        // caso GetString devolvía ese valor y anulaba la nueva MAC predeterminada.
+        // Persistimos la migración para que también aparezca en la interfaz.
+        if (!string.Equals(storedPcMacAddress, pcMacAddress, StringComparison.Ordinal))
+        {
+            preferences?.Edit()?.PutString(PcMacAddressKey, pcMacAddress)?.Apply();
+        }
 
         return new BardoSettings(
             preferences?.GetString(RelayUrlKey, defaults.RelayUrl) ?? defaults.RelayUrl,
             preferences?.GetString(ApiKeyKey, defaults.ApiKey) ?? defaults.ApiKey,
             preferences?.GetString(DeviceIdKey, defaults.DeviceId) ?? defaults.DeviceId,
             preferences?.GetString(WakeWordKey, defaults.WakeWord) ?? defaults.WakeWord,
-            preferences?.GetString(PcMacAddressKey, defaults.PcMacAddress) ?? defaults.PcMacAddress);
+            pcMacAddress);
     }
 
     public static void Save(Context context, BardoSettings settings)

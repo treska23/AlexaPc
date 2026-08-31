@@ -8,7 +8,7 @@ El recorrido actual es:
 
 ```text
 "Bardo"
-   -> reconocimiento de voz de Android
+   -> reconocimiento local Moonshine ES
    -> comando hablado
    -> HTTP local
    -> AlexaPc.Relay
@@ -48,6 +48,7 @@ Relay: http://IP_DEL_PC:5184
 API key: dev-api-key
 Device ID: pc-principal
 Palabra de activación: bardo
+MAC del PC: D8:BB:C1:58:13:F8
 ```
 
 6. La escucha comienza automáticamente al abrir la aplicación. Usa `Enviar comando de prueba` para comprobar el enlace sin depender del micrófono.
@@ -72,7 +73,16 @@ abre Chrome, busca vídeos de jazz en YouTube, coloca Chrome en la pantalla de l
 
 También controla aplicaciones y ventanas, distribución de pantallas, reproducción multimedia, volumen y consultas sobre lo que está abierto en el PC. Las acciones destructivas no se ejecutan por traducción libre.
 
-## Modo dedicado 0.2.3
+Para encender el PC cuando está apagado:
+
+```text
+Bardo
+enciende el ordenador
+```
+
+Bardo envía por la red local un paquete Wake-on-LAN a la MAC `D8:BB:C1:58:13:F8`. La tarjeta Realtek del PC tiene activados `Wake on Magic Packet` y `Shutdown Wake-On-Lan` y está autorizada como dispositivo de reactivación. El encendido desde apagado también depende de que Wake-on-LAN permanezca habilitado en la BIOS/UEFI y de que el PC conserve alimentación y conexión Ethernet.
+
+## Modo dedicado actual
 
 La aplicación incluye:
 
@@ -82,7 +92,7 @@ La aplicación incluye:
 - actividad `HOME`, para poder sustituir el lanzador de Android;
 - funcionamiento de voz con la pantalla apagada, sin encenderla al reconocer `Bardo`;
 - confirmación sonora inmediata al reconocer `Bardo`, que indica cuándo decir la orden;
-- reconocimiento local del dispositivo para la palabra `Bardo` y reconocimiento general separado para la orden;
+- reconocimiento local Moonshine ES para la palabra `Bardo` y Whisper multilingüe `base` cuantizado para entender mejor las órdenes completas, sin enviar la voz a Google ni a ningún servidor;
 - bloqueos de CPU y Wi-Fi mientras escucha;
 - servicio de voz permanente con notificación;
 - administración del dispositivo y modo quiosco preparados.
@@ -92,9 +102,9 @@ En el OPPO de desarrollo se ha aplicado además una configuración reversible:
 - Bardo es la aplicación de inicio predeterminada;
 - Bardo está excluido de la suspensión de batería de Android;
 - el asistente de Google está desactivado para que no compita por el micrófono ni por el botón de asistente;
-- el servicio de reconocimiento de voz de Android continúa disponible para Bardo.
+- el servicio de reconocimiento de voz de Android continúa instalado, aunque Bardo ya no depende de él.
 
-Esto hace que Bardo sustituya **en la práctica** a `OK Google` en el teléfono dedicado. No convierte todavía a Bardo en un servicio de hotword integrado en el DSP del fabricante: la versión actual mantiene ciclos de `SpeechRecognizer`. La siguiente mejora de consumo y latencia será un detector local específico de la palabra `Bardo`.
+Esto hace que Bardo sustituya **en la práctica** a `OK Google` en el teléfono dedicado. No convierte todavía a Bardo en un servicio de hotword integrado en el DSP del fabricante: la versión actual mantiene ciclos de captura local con Moonshine ES y tolera variantes de transcripción cercanas como `Vardo`, `Pardo` o `Borde`.
 
 La pantalla puede permanecer apagada. El servicio de primer plano reserva CPU y Wi-Fi y mantiene los ciclos del micrófono sin adquirir ningún bloqueo de pantalla. Al reconocer `Bardo`, reproduce un tono corto, abre una sesión nueva para la orden y la envía al PC sin iluminar el panel. Si el reconocedor repite la palabra `Bardo` al principio de la orden, la aplicación la elimina antes de enviarla. Su canal de notificación no usa sonido, vibración ni luz. La fiabilidad absoluta después de reinicios o cierres forzosos del fabricante requiere el aprovisionamiento como propietario del dispositivo descrito a continuación.
 
@@ -129,10 +139,10 @@ El OPPO tendrá dos palabras de activación con la pantalla apagada:
 
 La implementación deberá usar un único coordinador del micrófono y de las palabras de activación. Ese coordinador entregará cada conversación al motor correspondiente, evitando que Bardo y Alexa intenten escuchar simultáneamente o se bloqueen entre sí. Cada ruta tendrá una confirmación sonora distinta para que se sepa qué asistente ha respondido sin encender la pantalla.
 
-Esta integración se hará después de validar Bardo 0.2.3 con la pantalla apagada. La vía concreta de Alexa —aplicación instalada o servicio de voz autorizado— se decidirá en esa fase sin alterar el recorrido estable de Bardo.
+Esta integración se hará después de validar la versión actual de Bardo con la pantalla apagada. La vía concreta de Alexa —aplicación instalada o servicio de voz autorizado— se decidirá en esa fase sin alterar el recorrido estable de Bardo.
 
 ## Estado técnico
 
-La versión actual utiliza `SpeechRecognizer` de Android con preferencia por reconocimiento offline. Ya valida el recorrido teléfono -> relay -> agente -> ControlPCIA -> Windows y la transición `Bardo` -> orden.
+La versión actual utiliza Moonshine ES mediante sherpa-onnx para la activación permanente y Whisper `base` cuantizado para las órdenes. Si Whisper aún se está preparando o no puede cargarse, Moonshine continúa como respaldo. Todo el reconocimiento se ejecuta en el OPPO. Ya valida el recorrido teléfono -> relay -> agente -> ControlPCIA -> Windows, la transición `Bardo` -> orden y el envío Wake-on-LAN al PC.
 
-Las siguientes mejoras previstas son el detector doble de wake word totalmente local, la ruta de Alexa, respuesta hablada y estado del PC en la pantalla del teléfono.
+Las siguientes mejoras previstas son la ruta de Alexa, respuesta hablada y estado del PC en la pantalla del teléfono.

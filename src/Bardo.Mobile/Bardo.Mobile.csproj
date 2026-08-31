@@ -7,8 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>com.treska23.bardo</ApplicationId>
     <ApplicationTitle>Bardo</ApplicationTitle>
-    <ApplicationVersion>11</ApplicationVersion>
-    <ApplicationDisplayVersion>0.3.3</ApplicationDisplayVersion>
+    <ApplicationVersion>14</ApplicationVersion>
+    <ApplicationDisplayVersion>0.3.6</ApplicationDisplayVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">

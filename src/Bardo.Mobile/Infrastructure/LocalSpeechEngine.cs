@@ -12,8 +12,8 @@ internal sealed record LocalSpeechUtterance(
 
 /// <summary>
 /// Captura audio directamente con AudioRecord y lo transcribe en el propio
-/// teléfono con Moonshine ES + sherpa-onnx. No usa SpeechRecognizer ni necesita
-/// Google/Internet una vez descargado el modelo.
+/// teléfono con Moonshine ES y Whisper mediante sherpa-onnx. No usa
+/// SpeechRecognizer ni necesita Google/Internet una vez descargados los modelos.
 /// </summary>
 internal sealed class LocalSpeechEngine : IDisposable
 {
@@ -26,16 +26,24 @@ internal sealed class LocalSpeechEngine : IDisposable
     private const int LongEndSilenceFrames = 24; // 480 ms tras órdenes largas.
     private const int MinimumSpeechFrames = 5; // 100 ms
 
+    private readonly Context _context;
     private readonly AudioRecord _audioRecord;
     private readonly OfflineRecognizer _recognizer;
+    private OfflineRecognizer? _improvedCommandRecognizer;
     private bool _disposed;
     private float _noiseFloor = 0.006f;
 
-    private LocalSpeechEngine(AudioRecord audioRecord, OfflineRecognizer recognizer)
+    private LocalSpeechEngine(
+        Context context,
+        AudioRecord audioRecord,
+        OfflineRecognizer recognizer)
     {
+        _context = context.ApplicationContext ?? context;
         _audioRecord = audioRecord;
         _recognizer = recognizer;
     }
+
+    public bool ImprovedCommandRecognitionReady => _improvedCommandRecognizer is not null;
 
     public static async Task<LocalSpeechEngine> CreateAsync(
         Context context,
@@ -80,7 +88,54 @@ internal sealed class LocalSpeechEngine : IDisposable
         }
 
         progress?.Invoke("Motor español local listo");
-        return new LocalSpeechEngine(recorder, recognizer);
+        return new LocalSpeechEngine(context, recorder, recognizer);
+    }
+
+    public async Task PrepareImprovedCommandRecognitionAsync(
+        Action<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        WhisperSpeechModelPaths model = await WhisperSpeechModelManager.EnsureInstalledAsync(
+            _context,
+            progress,
+            cancellationToken).ConfigureAwait(false);
+
+        progress?.Invoke("Cargando Whisper español…");
+        var config = new OfflineRecognizerConfig();
+        config.ModelConfig.Whisper.Encoder = model.Encoder;
+        config.ModelConfig.Whisper.Decoder = model.Decoder;
+        config.ModelConfig.Whisper.Language = "es";
+        config.ModelConfig.Whisper.Task = "transcribe";
+        config.ModelConfig.Whisper.TailPaddings = -1;
+        config.ModelConfig.Tokens = model.Tokens;
+        config.ModelConfig.NumThreads = 4;
+        config.ModelConfig.Provider = "cpu";
+        config.ModelConfig.Debug = 0;
+
+        var recognizer = new OfflineRecognizer(config);
+        ValidateRecognizer(recognizer);
+        if (_disposed)
+        {
+            recognizer.Dispose();
+            throw new ObjectDisposedException(nameof(LocalSpeechEngine));
+        }
+
+        OfflineRecognizer? previous = Interlocked.Exchange(
+            ref _improvedCommandRecognizer,
+            recognizer);
+        previous?.Dispose();
+        progress?.Invoke("Whisper español listo");
+    }
+
+    private static void ValidateRecognizer(OfflineRecognizer recognizer)
+    {
+        // Fuerza una inferencia corta para detectar aquí modelos incompatibles o
+        // descargas corruptas, antes de anunciar que Whisper está disponible.
+        using OfflineStream stream = recognizer.CreateStream();
+        stream.AcceptWaveform(SampleRate, new float[SampleRate / 2]);
+        recognizer.Decode(stream);
+        _ = stream.Result.Text;
     }
 
     public async Task<LocalSpeechUtterance?> ListenForUtteranceAsync(
@@ -88,7 +143,8 @@ internal sealed class LocalSpeechEngine : IDisposable
         TimeSpan maximumUtterance,
         Action<float>? rmsChanged,
         Action<string>? eventChanged,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool preferImprovedRecognizer = false)
     {
         ThrowIfDisposed();
         EnsureRecording();
@@ -212,7 +268,10 @@ internal sealed class LocalSpeechEngine : IDisposable
         }
 
         eventChanged?.Invoke("transcribiendo localmente");
-        string text = await DecodeAsync(samples, cancellationToken).ConfigureAwait(false);
+        OfflineRecognizer decoder = preferImprovedRecognizer && _improvedCommandRecognizer is not null
+            ? _improvedCommandRecognizer
+            : _recognizer;
+        string text = await DecodeAsync(samples, decoder, cancellationToken).ConfigureAwait(false);
         eventChanged?.Invoke(string.IsNullOrWhiteSpace(text)
             ? "transcripción local vacía"
             : $"local: {text}");
@@ -242,6 +301,7 @@ internal sealed class LocalSpeechEngine : IDisposable
 
     private async Task<string> DecodeAsync(
         IReadOnlyList<short> pcm,
+        OfflineRecognizer recognizer,
         CancellationToken cancellationToken)
     {
         float[] samples = new float[pcm.Count];
@@ -253,9 +313,9 @@ internal sealed class LocalSpeechEngine : IDisposable
         return await Task.Run(() =>
         {
             cancellationToken.ThrowIfCancellationRequested();
-            using OfflineStream stream = _recognizer.CreateStream();
+            using OfflineStream stream = recognizer.CreateStream();
             stream.AcceptWaveform(SampleRate, samples);
-            _recognizer.Decode(stream);
+            recognizer.Decode(stream);
             return stream.Result.Text ?? string.Empty;
         }, cancellationToken).ConfigureAwait(false);
     }
@@ -336,6 +396,7 @@ internal sealed class LocalSpeechEngine : IDisposable
             // Android puede haber liberado ya el recurso durante el cierre.
         }
         _audioRecord.Dispose();
+        Interlocked.Exchange(ref _improvedCommandRecognizer, null)?.Dispose();
         _recognizer.Dispose();
     }
 }
