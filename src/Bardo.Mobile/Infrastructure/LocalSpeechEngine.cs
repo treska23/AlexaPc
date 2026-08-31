@@ -21,7 +21,9 @@ internal sealed class LocalSpeechEngine : IDisposable
     private const int FrameSamples = 320; // 20 ms
     private const int PreRollFrames = 20; // 400 ms: conserva consonantes/sílabas iniciales al hablar rápido.
     private const int StartFramesRequired = 2;
-    private const int EndSilenceFrames = 36; // 720 ms: tolera pausas naturales dentro de una orden.
+    private const int FastEndSilenceFrames = 14; // 280 ms tras órdenes cortas.
+    private const int NormalEndSilenceFrames = 18; // 360 ms tras frases normales.
+    private const int LongEndSilenceFrames = 24; // 480 ms tras órdenes largas.
     private const int MinimumSpeechFrames = 5; // 100 ms
 
     private readonly AudioRecord _audioRecord;
@@ -124,10 +126,13 @@ internal sealed class LocalSpeechEngine : IDisposable
                 peakDb = Math.Max(peakDb, rmsDb);
                 rmsChanged?.Invoke(rmsDb);
 
-                // Más tolerante que la primera versión: antes exigíamos ~2.15x el ruido
-                // ambiente y se podían perder ataques suaves al hablar deprisa.
+                // Umbral de arranque tolerante para no comernos la primera sílaba.
                 float startThreshold = Math.Max(0.0052f, _noiseFloor * 1.75f);
-                float silenceThreshold = Math.Max(0.0038f, _noiseFloor * 1.20f);
+
+                // Para terminar una frase usamos histéresis: el umbral es bastante más
+                // alto que el ruido base. Así la TV o el ruido de habitación no alargan
+                // artificialmente la escucha después de la última palabra.
+                float silenceThreshold = Math.Max(0.0045f, _noiseFloor * 1.45f);
 
                 if (!inSpeech)
                 {
@@ -177,8 +182,15 @@ internal sealed class LocalSpeechEngine : IDisposable
                 }
 
                 bool enoughSpeech = speechFrames >= MinimumSpeechFrames;
-                bool endedBySilence = enoughSpeech && silentFrames >= EndSilenceFrames;
+                int requiredSilenceFrames = GetRequiredEndSilenceFrames(spoken.Elapsed);
+                bool endedBySilence = enoughSpeech && silentFrames >= requiredSilenceFrames;
                 bool reachedMaximum = spoken.Elapsed >= maximumUtterance;
+
+                if (endedBySilence)
+                {
+                    eventChanged?.Invoke(
+                        $"fin de frase detectado · {requiredSilenceFrames * 20} ms desde la última voz");
+                }
 
                 if (endedBySilence || reachedMaximum)
                 {
@@ -208,6 +220,24 @@ internal sealed class LocalSpeechEngine : IDisposable
         return string.IsNullOrWhiteSpace(text)
             ? null
             : new LocalSpeechUtterance(text.Trim(), peakDb, spoken.Elapsed);
+    }
+
+    private static int GetRequiredEndSilenceFrames(TimeSpan spokenDuration)
+    {
+        // El final ya no usa una espera fija de 720 ms. Se decide por silencio
+        // consecutivo desde la última voz y se adapta a la longitud de la frase.
+        // Una orden tipo «play en la tele» queda lista en ~280 ms tras terminar.
+        if (spokenDuration < TimeSpan.FromSeconds(1.5))
+        {
+            return FastEndSilenceFrames;
+        }
+
+        if (spokenDuration < TimeSpan.FromSeconds(3))
+        {
+            return NormalEndSilenceFrames;
+        }
+
+        return LongEndSilenceFrames;
     }
 
     private async Task<string> DecodeAsync(
