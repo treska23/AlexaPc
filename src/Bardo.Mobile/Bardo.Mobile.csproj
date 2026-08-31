@@ -7,8 +7,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationId>com.treska23.bardo</ApplicationId>
     <ApplicationTitle>Bardo</ApplicationTitle>
-    <ApplicationVersion>7</ApplicationVersion>
-    <ApplicationDisplayVersion>0.2.4</ApplicationDisplayVersion>
+    <ApplicationVersion>8</ApplicationVersion>
+    <ApplicationDisplayVersion>0.3.0</ApplicationDisplayVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
@@ -17,4 +17,10 @@
          on Visual Studio/.NET Android Fast Deployment override files. -->
     <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Local/offline ASR. The package includes the Android arm64 runtime used by
+         the dedicated OPPO, so recognition no longer depends on SpeechRecognizer. -->
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
+  </ItemGroup>
 </Project>
