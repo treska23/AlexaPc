@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using AlexaPc.Agent.Models;
 using Windows.Media.Control;
@@ -47,6 +49,8 @@ public sealed class BuiltInActionService
             case "volume.down":
                 PressMediaKey(VkVolumeDown);
                 return CommandResult.Ok("Hecho.");
+            case "system.mac":
+                return GetWakeOnLanMacAddress();
             case "system.lock":
                 StartSystemProcess("rundll32.exe", "user32.dll,LockWorkStation");
                 return CommandResult.Ok("Ordenador bloqueado.");
@@ -63,6 +67,40 @@ public sealed class BuiltInActionService
                 return CommandResult.Ok("El ordenador se reiniciará en cinco segundos.");
             default:
                 return CommandResult.Fail($"Acción integrada desconocida: {action}");
+        }
+    }
+
+    private static CommandResult GetWakeOnLanMacAddress()
+    {
+        try
+        {
+            var candidate = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(adapter => adapter.NetworkInterfaceType == NetworkInterfaceType.Ethernet)
+                .Where(adapter => adapter.GetPhysicalAddress().GetAddressBytes().Length == 6)
+                .Select(adapter => new
+                {
+                    Adapter = adapter,
+                    HasGateway = adapter.GetIPProperties().GatewayAddresses.Any(gateway =>
+                        !IPAddress.Any.Equals(gateway.Address) &&
+                        !IPAddress.IPv6Any.Equals(gateway.Address))
+                })
+                .OrderByDescending(item => item.HasGateway)
+                .ThenByDescending(item => item.Adapter.OperationalStatus == OperationalStatus.Up)
+                .ThenByDescending(item => item.Adapter.Speed)
+                .FirstOrDefault();
+
+            if (candidate is null)
+            {
+                return CommandResult.Fail("No he encontrado un adaptador Ethernet válido para Wake-on-LAN.");
+            }
+
+            byte[] address = candidate.Adapter.GetPhysicalAddress().GetAddressBytes();
+            string mac = string.Join(":", address.Select(value => value.ToString("X2")));
+            return CommandResult.Ok($"MAC WOL: {mac}");
+        }
+        catch (Exception ex)
+        {
+            return CommandResult.Fail($"No he podido obtener la MAC Wake-on-LAN: {ex.Message}");
         }
     }
 
