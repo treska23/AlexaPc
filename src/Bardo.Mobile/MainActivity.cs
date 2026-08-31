@@ -95,6 +95,18 @@ public sealed class MainActivity : Activity
         RequestRequiredPermissions();
     }
 
+    protected override void OnStart()
+    {
+        base.OnStart();
+        BardoVoiceService.StatusChanged += OnVoiceStatusChanged;
+    }
+
+    protected override void OnStop()
+    {
+        BardoVoiceService.StatusChanged -= OnVoiceStatusChanged;
+        base.OnStop();
+    }
+
     protected override void OnResume()
     {
         base.OnResume();
@@ -103,6 +115,11 @@ public sealed class MainActivity : Activity
         {
             SetStatus(BardoVoiceService.CurrentStatus);
         }
+    }
+
+    private void OnVoiceStatusChanged(string status)
+    {
+        RunOnUiThread(() => SetStatus(status));
     }
 
     private async Task StartListeningAsync()
