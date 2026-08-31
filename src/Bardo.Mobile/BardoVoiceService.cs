@@ -1,0 +1,627 @@
+using Android.App;
+using Android.Content;
+using Android.Content.PM;
+using Android.Media;
+using Android.Net.Wifi;
+using Android.OS;
+using Android.Util;
+using Bardo.Mobile.Infrastructure;
+using System.Text.RegularExpressions;
+
+namespace Bardo.Mobile;
+
+[Service(
+    Name = "com.treska23.bardo.BardoVoiceService",
+    Exported = false,
+    ForegroundServiceType = ForegroundService.TypeMicrophone)]
+public sealed class BardoVoiceService : Service
+{
+    private const string ChannelId = "bardo-listening";
+    private const int NotificationId = 1701;
+    private const string ActionStop = "com.treska23.bardo.STOP";
+    private const string LogTag = "BardoVoice";
+
+    private readonly RelayCommandClient _relayClient = new();
+    private readonly WakeOnLanClient _wakeOnLanClient = new();
+    private readonly CancellationTokenSource _shutdown = new();
+
+    private PowerManager.WakeLock? _cpuWakeLock;
+    private WifiManager.WifiLock? _wifiLock;
+    private ToneGenerator? _feedbackTone;
+    private LocalSpeechEngine? _localEngine;
+    private Task? _voiceLoopTask;
+    private Task? _improvedRecognitionPreparation;
+    private BardoSettings _settings = BardoSettings.Default;
+    private bool _destroyed;
+    private bool _commandInFlight;
+
+    public static bool IsRunning { get; private set; }
+    public static bool LocalEngineReady { get; private set; }
+    public static string CurrentStatus { get; private set; } = "detenido";
+    public static float LastRmsDb { get; private set; } = float.NaN;
+    public static string LastRecognizerEvent { get; private set; } = "sin eventos";
+    public static event Action<string>? StatusChanged;
+
+    public override void OnCreate()
+    {
+        base.OnCreate();
+        IsRunning = true;
+        LocalEngineReady = false;
+        CurrentStatus = "iniciando servicio";
+        LastRmsDb = float.NaN;
+        LastRecognizerEvent = "iniciando motor local";
+
+        try
+        {
+            _settings = BardoSettingsStore.Load(this);
+            CreateNotificationChannel();
+            StartAsForeground("Preparando voz local…");
+            AcquireDedicatedResourceLocks();
+            StartVoiceLoop();
+        }
+        catch (Exception ex)
+        {
+            Log.Error(LogTag, $"OnCreate falló: {ex}");
+            LastRecognizerEvent = $"fallo: {ex.GetType().Name}";
+            SetServiceStatus($"Fallo al iniciar: {ex.GetType().Name}: {ex.Message}");
+            StopSelf();
+        }
+    }
+
+    public override StartCommandResult OnStartCommand(Intent? intent, StartCommandFlags flags, int startId)
+    {
+        if (intent?.Action == ActionStop)
+        {
+            StopSelf();
+            return StartCommandResult.NotSticky;
+        }
+
+        _settings = BardoSettingsStore.Load(this);
+        if (_voiceLoopTask is null || _voiceLoopTask.IsCompleted)
+        {
+            StartVoiceLoop();
+        }
+
+        return StartCommandResult.Sticky;
+    }
+
+    public override IBinder? OnBind(Intent? intent) => null;
+
+    public override void OnDestroy()
+    {
+        _destroyed = true;
+        IsRunning = false;
+        LocalEngineReady = false;
+        CurrentStatus = "detenido";
+        LastRecognizerEvent = "servicio detenido";
+        StatusChanged?.Invoke(CurrentStatus);
+
+        _shutdown.Cancel();
+        try
+        {
+            _localEngine?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"Error cerrando motor local: {ex.Message}");
+        }
+        _localEngine = null;
+
+        ReleaseFeedbackTone();
+        ReleaseDedicatedResourceLocks();
+        _shutdown.Dispose();
+        base.OnDestroy();
+    }
+
+    private void StartVoiceLoop()
+    {
+        if (_destroyed || (_voiceLoopTask is { IsCompleted: false }))
+        {
+            return;
+        }
+
+        _voiceLoopTask = RunVoiceLoopAsync(_shutdown.Token);
+    }
+
+    private async Task RunVoiceLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            SetServiceStatus(LocalSpeechModelManager.IsInstalled(this)
+                ? "Cargando voz española local…"
+                : "Primera instalación · descargando voz española local…");
+
+            _localEngine = await LocalSpeechEngine.CreateAsync(
+                this,
+                message =>
+                {
+                    LastRecognizerEvent = message;
+                    SetServiceStatus(message);
+                },
+                cancellationToken).ConfigureAwait(false);
+
+            LocalEngineReady = true;
+            LastRecognizerEvent = "motor local listo";
+            SetWaitingStatus();
+            _improvedRecognitionPreparation = PrepareImprovedRecognitionAsync(
+                _localEngine,
+                cancellationToken);
+
+            while (!cancellationToken.IsCancellationRequested && !_destroyed)
+            {
+                _settings = BardoSettingsStore.Load(this);
+
+                LocalSpeechUtterance? wakeCandidate = await _localEngine.ListenForUtteranceAsync(
+                    timeout: null,
+                    maximumUtterance: TimeSpan.FromSeconds(3.2),
+                    rmsChanged: rms => LastRmsDb = rms,
+                    eventChanged: message => LastRecognizerEvent = $"Wake · {message}",
+                    cancellationToken).ConfigureAwait(false);
+
+                if (wakeCandidate is null)
+                {
+                    continue;
+                }
+
+                LastRecognizerEvent = $"Wake · «{wakeCandidate.Text}»";
+                Log.Info(LogTag, $"Wake local candidate: {wakeCandidate.Text}");
+
+                if (!WakeWordMatcher.Matches(wakeCandidate.Text, _settings.WakeWord))
+                {
+                    continue;
+                }
+
+                string inlineCommand = WakeWordMatcher.ExtractCommandAfterWakeWord(
+                    wakeCandidate.Text,
+                    _settings.WakeWord);
+
+                PlayWakeAcknowledgement();
+                Log.Info(LogTag, $"Wake local detectada: {wakeCandidate.Text}");
+
+                if (!string.IsNullOrWhiteSpace(inlineCommand))
+                {
+                    await ExecuteCommandAndResumeAsync(inlineCommand, cancellationToken).ConfigureAwait(false);
+                    SetWaitingStatus();
+                    continue;
+                }
+
+                SetServiceStatus("Bardo detectado · habla ahora");
+
+                // El tono dura 180 ms. Esperamos a que termine para que AudioRecord no
+                // se escuche a sí mismo y corte la primera sílaba de la orden.
+                await Task.Delay(220, cancellationToken).ConfigureAwait(false);
+
+                string? command = await ListenForCommandAsync(cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(command))
+                {
+                    SetServiceStatus("No te he oído · habla ahora");
+                    await Task.Delay(180, cancellationToken).ConfigureAwait(false);
+                    command = await ListenForCommandAsync(cancellationToken).ConfigureAwait(false);
+                }
+
+                if (string.IsNullOrWhiteSpace(command))
+                {
+                    SetServiceStatus("No he entendido la orden");
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                    SetWaitingStatus();
+                    continue;
+                }
+
+                await ExecuteCommandAndResumeAsync(command, cancellationToken).ConfigureAwait(false);
+                SetWaitingStatus();
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cierre normal del servicio.
+        }
+        catch (Exception ex)
+        {
+            LocalEngineReady = false;
+            LastRecognizerEvent = $"motor local: {ex.GetType().Name}: {ex.Message}";
+            Log.Error(LogTag, $"Motor local detenido por error: {ex}");
+            SetServiceStatus($"Error de voz local · {ex.Message}");
+        }
+    }
+
+    private async Task<string?> ListenForCommandAsync(CancellationToken cancellationToken)
+    {
+        if (_localEngine is null)
+        {
+            return null;
+        }
+
+        bool useWhisper = _localEngine.ImprovedCommandRecognitionReady;
+        SetServiceStatus(useWhisper
+            ? "Bardo · habla ahora · Whisper español"
+            : "Bardo · habla ahora · Moonshine español");
+
+        LocalSpeechUtterance? utterance = await _localEngine.ListenForUtteranceAsync(
+            timeout: TimeSpan.FromSeconds(7),
+            maximumUtterance: TimeSpan.FromSeconds(7),
+            rmsChanged: rms => LastRmsDb = rms,
+            eventChanged: message =>
+            {
+                LastRecognizerEvent = $"Command · {message}";
+                if (message == "voz detectada por AudioRecord")
+                {
+                    SetServiceStatus("Escuchando comando…");
+                }
+            },
+            cancellationToken,
+            preferImprovedRecognizer: useWhisper).ConfigureAwait(false);
+
+        if (utterance is null)
+        {
+            return null;
+        }
+
+        string engine = useWhisper ? "Whisper" : "Moonshine";
+        LastRecognizerEvent = $"Command {engine} · «{utterance.Text}»";
+        Log.Info(LogTag, $"Comando reconocido por {engine}: {utterance.Text}");
+        return NormalizeCommand(utterance.Text);
+    }
+
+    private async Task PrepareImprovedRecognitionAsync(
+        LocalSpeechEngine engine,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await engine.PrepareImprovedCommandRecognitionAsync(
+                progress: message => Log.Info(LogTag, message),
+                cancellationToken).ConfigureAwait(false);
+            Log.Info(LogTag, "Reconocimiento mejorado de órdenes preparado");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cierre normal del servicio durante la descarga o la carga.
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"Whisper no disponible; Moonshine seguirá activo: {ex}");
+        }
+    }
+
+    private async Task ExecuteCommandAndResumeAsync(
+        string command,
+        CancellationToken cancellationToken)
+    {
+        if (_commandInFlight || _destroyed)
+        {
+            return;
+        }
+
+        string normalizedCommand = NormalizeCommand(command);
+        if (normalizedCommand.Length == 0)
+        {
+            return;
+        }
+
+        _commandInFlight = true;
+        try
+        {
+            if (IsWakeComputerCommand(normalizedCommand))
+            {
+                await WakeComputerAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (IsShutdownComputerCommand(normalizedCommand))
+            {
+                bool macReady = await EnsurePcMacKnownAsync(cancellationToken).ConfigureAwait(false);
+                if (!macReady)
+                {
+                    SetServiceStatus("No apago el PC hasta guardar su MAC para poder volver a encenderlo");
+                    await Task.Delay(1_200, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                // El agente ya tiene esta acción integrada y programa un apagado limpio
+                // con cinco segundos de margen para devolver la respuesta por el relay.
+                normalizedCommand = "apaga ordenador";
+            }
+
+            SetServiceStatus($"Ejecutando: {normalizedCommand}");
+            LastRecognizerEvent = $"SEND · {normalizedCommand}";
+            Log.Info(LogTag, $"SEND local once: {normalizedCommand}");
+
+            RelayCommandResult result = await _relayClient.SendAsync(
+                _settings,
+                normalizedCommand,
+                cancellationToken).ConfigureAwait(false);
+
+            if (_destroyed)
+            {
+                return;
+            }
+
+            Log.Info(LogTag, $"Relay success={result.Success}: {result.Message}");
+            SetServiceStatus(result.Success
+                ? $"Hecho · {result.Message}"
+                : $"Error · {result.Message}");
+            await Task.Delay(700, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _commandInFlight = false;
+        }
+    }
+
+    private async Task WakeComputerAsync(CancellationToken cancellationToken)
+    {
+        bool macReady = await EnsurePcMacKnownAsync(cancellationToken).ConfigureAwait(false);
+        if (!macReady)
+        {
+            SetServiceStatus("No conozco la MAC del PC · enciéndelo una vez manualmente para que Bardo pueda aprenderla");
+            await Task.Delay(1_200, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        string mac = WakeOnLanClient.NormalizeMac(_settings.PcMacAddress);
+        SetServiceStatus("Encendiendo ordenador…");
+        LastRecognizerEvent = $"WOL · {mac}";
+        Log.Info(LogTag, $"Enviando Wake-on-LAN a {mac}");
+        await _wakeOnLanClient.WakeAsync(mac, cancellationToken).ConfigureAwait(false);
+        SetServiceStatus("Hecho · señal de encendido enviada al ordenador");
+        await Task.Delay(700, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> EnsurePcMacKnownAsync(CancellationToken cancellationToken)
+    {
+        if (WakeOnLanClient.IsValidMac(_settings.PcMacAddress))
+        {
+            string normalized = WakeOnLanClient.NormalizeMac(_settings.PcMacAddress);
+            if (!string.Equals(normalized, _settings.PcMacAddress, StringComparison.Ordinal))
+            {
+                _settings = _settings with { PcMacAddress = normalized };
+                BardoSettingsStore.Save(this, _settings);
+            }
+
+            return true;
+        }
+
+        SetServiceStatus("Aprendiendo la MAC del ordenador…");
+        LastRecognizerEvent = "WOL · solicitando MAC al agente";
+
+        RelayCommandResult result = await _relayClient.SendAsync(
+            _settings,
+            "mac ordenador",
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Success)
+        {
+            Log.Warn(LogTag, $"No se pudo aprender la MAC: {result.Message}");
+            return false;
+        }
+
+        Match match = Regex.Match(
+            result.Message ?? string.Empty,
+            @"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}",
+            RegexOptions.CultureInvariant);
+
+        if (!match.Success || !WakeOnLanClient.IsValidMac(match.Value))
+        {
+            Log.Warn(LogTag, $"La respuesta del agente no contenía una MAC válida: {result.Message}");
+            return false;
+        }
+
+        string mac = WakeOnLanClient.NormalizeMac(match.Value);
+        _settings = _settings with { PcMacAddress = mac };
+        BardoSettingsStore.Save(this, _settings);
+        LastRecognizerEvent = $"WOL · MAC aprendida {mac}";
+        SetServiceStatus($"Wake-on-LAN preparado · MAC {mac}");
+        Log.Info(LogTag, $"MAC del PC aprendida y guardada: {mac}");
+        return true;
+    }
+
+    private static bool IsWakeComputerCommand(string command) =>
+        Regex.IsMatch(
+            command,
+            @"\b(?:enciende|encender|despierta|despertar|arranca|arrancar)\b.*\b(?:ordenador|computadora|pc|equipo)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static bool IsShutdownComputerCommand(string command) =>
+        Regex.IsMatch(
+            command,
+            @"\b(?:apaga|apagar)\b.*\b(?:ordenador|computadora|pc|equipo)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private string NormalizeCommand(string command)
+    {
+        string normalized = command.Trim();
+        if (normalized.Length == 0)
+        {
+            return normalized;
+        }
+
+        string withoutWakeWord = WakeWordMatcher.ExtractCommandAfterWakeWord(
+            normalized,
+            _settings.WakeWord);
+        if (withoutWakeWord.Length > 0)
+        {
+            normalized = withoutWakeWord;
+        }
+        else if (WakeWordMatcher.Matches(normalized, _settings.WakeWord) &&
+                 Regex.Matches(normalized, @"\p{L}+", RegexOptions.CultureInvariant).Count <= 2)
+        {
+            // Si durante la escucha de comando sólo repite «Bardo», no mandamos eso
+            // al PC como si fuera una orden.
+            return string.Empty;
+        }
+
+        return normalized.Trim(' ', ',', '.', ';', ':', '¿', '?', '¡', '!');
+    }
+
+    private void SetWaitingStatus()
+    {
+        if (_destroyed)
+        {
+            return;
+        }
+
+        string commandEngine = _localEngine?.ImprovedCommandRecognitionReady == true
+            ? "órdenes Whisper ES"
+            : "órdenes Moonshine ES";
+        SetServiceStatus($"Esperando «{_settings.WakeWord}» · local · {commandEngine}");
+    }
+
+    private void PlayWakeAcknowledgement()
+    {
+        try
+        {
+            _feedbackTone ??= new ToneGenerator(Android.Media.Stream.Alarm, 85);
+            _feedbackTone.StopTone();
+            _feedbackTone.StartTone(Tone.PropAck, 180);
+            Log.Info(LogTag, "Tono de wake word reproducido");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudo reproducir el tono de wake word: {ex}");
+        }
+    }
+
+    private void ReleaseFeedbackTone()
+    {
+        try
+        {
+            _feedbackTone?.StopTone();
+            _feedbackTone?.Release();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudo liberar el tono: {ex}");
+        }
+        finally
+        {
+            _feedbackTone?.Dispose();
+            _feedbackTone = null;
+        }
+    }
+
+    private void AcquireDedicatedResourceLocks()
+    {
+        try
+        {
+            var powerManager = (PowerManager?)GetSystemService(PowerService);
+            _cpuWakeLock = powerManager?.NewWakeLock(
+                WakeLockFlags.Partial,
+                "com.treska23.bardo:voice-cpu");
+            _cpuWakeLock?.SetReferenceCounted(false);
+            _cpuWakeLock?.Acquire();
+
+            var wifiManager = (WifiManager?)ApplicationContext?.GetSystemService(WifiService);
+            _wifiLock = wifiManager?.CreateWifiLock(
+                WifiMode.FullHighPerf,
+                "com.treska23.bardo:voice-wifi");
+            _wifiLock?.SetReferenceCounted(false);
+            _wifiLock?.Acquire();
+
+            Log.Info(
+                LogTag,
+                $"Recursos dedicados: CPU={_cpuWakeLock?.IsHeld == true}, WiFi={_wifiLock?.IsHeld == true}");
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudieron reservar todos los recursos dedicados: {ex}");
+        }
+    }
+
+    private void ReleaseDedicatedResourceLocks()
+    {
+        try
+        {
+            if (_wifiLock?.IsHeld == true)
+            {
+                _wifiLock.Release();
+            }
+
+            if (_cpuWakeLock?.IsHeld == true)
+            {
+                _cpuWakeLock.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn(LogTag, $"No se pudieron liberar los recursos dedicados: {ex}");
+        }
+        finally
+        {
+            _wifiLock?.Dispose();
+            _wifiLock = null;
+            _cpuWakeLock?.Dispose();
+            _cpuWakeLock = null;
+        }
+    }
+
+    private void CreateNotificationChannel()
+    {
+        var manager = (NotificationManager?)GetSystemService(NotificationService);
+        if (manager is null)
+        {
+            return;
+        }
+
+        var channel = new NotificationChannel(
+            ChannelId,
+            "Escucha de Bardo",
+            NotificationImportance.Low)
+        {
+            Description = "Mantiene activo el asistente de voz Bardo"
+        };
+        channel.EnableLights(false);
+        channel.EnableVibration(false);
+        channel.SetSound(null, null);
+        manager.CreateNotificationChannel(channel);
+    }
+
+    private void StartAsForeground(string message)
+    {
+        Notification notification = BuildNotification(message);
+        if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
+        {
+            StartForeground(NotificationId, notification, ForegroundService.TypeMicrophone);
+        }
+        else
+        {
+            StartForeground(NotificationId, notification);
+        }
+    }
+
+    private void SetServiceStatus(string message)
+    {
+        CurrentStatus = message;
+        Log.Info(LogTag, message);
+        UpdateNotification(message);
+        StatusChanged?.Invoke(message);
+    }
+
+    private void UpdateNotification(string message)
+    {
+        var manager = (NotificationManager?)GetSystemService(NotificationService);
+        manager?.Notify(NotificationId, BuildNotification(message));
+    }
+
+    private Notification BuildNotification(string message)
+    {
+        var stopIntent = new Intent(this, typeof(BardoVoiceService));
+        stopIntent.SetAction(ActionStop);
+
+        PendingIntent? stopPendingIntent = PendingIntent.GetService(
+            this,
+            1,
+            stopIntent,
+            PendingIntentFlags.UpdateCurrent | PendingIntentFlags.Immutable);
+
+        var builder = new Notification.Builder(this, ChannelId);
+        builder.SetContentTitle("Bardo");
+        builder.SetContentText(message);
+        builder.SetSmallIcon(Android.Resource.Drawable.IcDialogInfo);
+        builder.SetOngoing(true);
+        builder.SetOnlyAlertOnce(true);
+        builder.SetCategory(Notification.CategoryService);
+        builder.SetVisibility(NotificationVisibility.Secret);
+        builder.AddAction(Android.Resource.Drawable.IcDelete, "Parar", stopPendingIntent);
+        return builder.Build() ?? throw new InvalidOperationException("No se pudo crear la notificación de Bardo.");
+    }
+}

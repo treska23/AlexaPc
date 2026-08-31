@@ -1,6 +1,57 @@
-# Encender y apagar el ordenador con Alexa
+# Encender y apagar el ordenador por voz
 
-## Nombres que no colisionan
+## Bardo Android
+
+Bardo puede controlar el encendido y el apagado del PC sin depender de Alexa.
+
+### Apagado
+
+La orden:
+
+```text
+Bardo
+apaga el ordenador
+```
+
+se normaliza a `apaga ordenador`, que AlexaPc.Agent ejecuta como `system.shutdown`.
+Windows programa el apagado cinco segundos después para que la respuesta pueda
+volver al teléfono antes de que desaparezca la red.
+
+Antes del primer apagado, si Bardo todavía no conoce la MAC del PC, consulta al
+Agent mediante el comando interno `mac ordenador`. El Agent selecciona el adaptador
+Ethernet físico preferente, devuelve su MAC y Bardo la guarda en sus preferencias.
+Si no puede aprenderla, Bardo no apaga el PC para evitar dejar al usuario sin una
+forma preparada de volver a encenderlo.
+
+### Encendido
+
+La orden:
+
+```text
+Bardo
+enciende el ordenador
+```
+
+no usa el Relay ni el Agent, porque ambos pueden estar apagados. El OPPO envía
+directamente un paquete mágico Wake-on-LAN por la red local a la MAC almacenada.
+Se envían varias copias por broadcast UDP en los puertos 9 y 7.
+
+La MAC queda visible/editable en la aplicación Android bajo:
+
+```text
+MAC del PC · Wake-on-LAN
+```
+
+Normalmente no es necesario escribirla a mano: se aprende automáticamente durante
+el primer apagado mientras el PC sigue encendido.
+
+El adaptador de red y la UEFI de Windows deben seguir configurados para aceptar
+Wake-on-LAN desde apagado. En este equipo ya se había preparado el adaptador Realtek
+para Magic Packet.
+
+## Alexa
+
+### Nombres que no colisionan
 
 La aplicación y la Skill usan siempre **ordenador**. El interruptor físico no debe
 llamarse `PC` ni `ordenador`, porque Alexa lo resolvería como dispositivo y cortaría
@@ -13,7 +64,7 @@ accidente, por ejemplo:
 corriente de la torre
 ```
 
-## Apagado limpio
+### Apagado limpio
 
 La orden que cierra Windows es:
 
@@ -32,7 +83,7 @@ la app de Alexa:
 
 La rutina no debe apagar directamente `corriente de la torre`.
 
-## Encendido con el interruptor existente
+### Encendido con el interruptor existente
 
 La placa detectada es una MSI MAG X570S TOMAHAWK MAX WIFI. En su UEFI, activa:
 
@@ -51,11 +102,3 @@ El ciclo es necesario porque, tras un apagado limpio de Windows, el interruptor
 sigue encendido. Al recuperar la corriente, la opción de la UEFI arranca el
 ordenador. Usa esta rutina solo cuando el ordenador ya esté apagado: si se ejecuta
 mientras está encendido, cortará la alimentación.
-
-## Alternativa futura: Wake-on-LAN
-
-El adaptador Realtek aparece habilitado como dispositivo de reactivación en
-Windows. Wake-on-LAN evita cortar corriente, pero necesita otro dispositivo que
-permanezca encendido en la red local para enviar el paquete mágico (router, NAS,
-Raspberry Pi u otro equipo). El propio AlexaPc no puede despertarse a sí mismo una
-vez apagado y Cloudflare Workers no tiene acceso directo a la red doméstica.

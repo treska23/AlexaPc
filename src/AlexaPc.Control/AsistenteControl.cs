@@ -25,6 +25,17 @@ internal static class AsistenteControl
         CancellationToken cancellationToken = default,
         bool soloTraducir = false)
     {
+        ResultadoControl? television =
+            await ControlBravia.IntentarControlarAsync(
+                instruccion,
+                cancellationToken,
+                soloTraducir);
+
+        if (television is not null)
+        {
+            return television;
+        }
+
         ResultadoControl basico =
             await ControlBasico.ControlarAsync(
                 instruccion,

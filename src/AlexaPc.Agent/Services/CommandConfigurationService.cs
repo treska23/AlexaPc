@@ -160,6 +160,13 @@ public sealed class CommandConfigurationService
         },
         new()
         {
+            Name = "mac ordenador",
+            Description = "Devuelve la MAC Ethernet usada por Wake-on-LAN.",
+            Type = CommandType.BuiltIn,
+            Target = "system.mac"
+        },
+        new()
+        {
             Name = "bloquea ordenador",
             Description = "Bloquea la sesión actual de Windows.",
             Type = CommandType.BuiltIn,
