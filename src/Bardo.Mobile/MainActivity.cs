@@ -2,7 +2,6 @@ using Android.App;
 using Android.Content;
 using Android.Content.PM;
 using Android.OS;
-using Android.Speech;
 using Android.Views;
 using Android.Widget;
 using Bardo.Mobile.Infrastructure;
@@ -65,7 +64,7 @@ public sealed class MainActivity : Activity
 
         var subtitle = new TextView(this)
         {
-            Text = "Control de voz dedicado para el PC",
+            Text = "Control de voz local para PC y dispositivos",
             TextSize = 16f
         };
         subtitle.SetPadding(0, 0, 0, Dp(20));
@@ -218,23 +217,20 @@ public sealed class MainActivity : Activity
 
     private void ShowVoiceDiagnostics()
     {
-        var microphoneGranted =
+        bool microphoneGranted =
             CheckSelfPermission(Android.Manifest.Permission.RecordAudio) == Permission.Granted;
-        var standardAvailable = SpeechRecognizer.IsRecognitionAvailable(this);
-        var onDeviceAvailable =
-            Build.VERSION.SdkInt >= BuildVersionCodes.S &&
-            SpeechRecognizer.IsOnDeviceRecognitionAvailable(this);
-
-        var running = BardoVoiceService.IsRunning;
-        var serviceStatus = BardoVoiceService.CurrentStatus;
-        var rms = float.IsNaN(BardoVoiceService.LastRmsDb)
+        bool modelInstalled = LocalSpeechModelManager.IsInstalled(this);
+        bool running = BardoVoiceService.IsRunning;
+        bool engineReady = BardoVoiceService.LocalEngineReady;
+        string serviceStatus = BardoVoiceService.CurrentStatus;
+        string rms = float.IsNaN(BardoVoiceService.LastRmsDb)
             ? "sin señal"
             : $"{BardoVoiceService.LastRmsDb:0.0} dB";
-        var recognizerEvent = BardoVoiceService.LastRecognizerEvent;
-        var dedicatedMode = DedicatedModeController.GetStatus(this);
+        string recognizerEvent = BardoVoiceService.LastRecognizerEvent;
+        string dedicatedMode = DedicatedModeController.GetStatus(this);
 
         SetStatus(
-            $"Micro={microphoneGranted} · Voz sistema={standardAvailable} · Voz local={onDeviceAvailable} · Servicio={running} · RMS={rms} · Evento={recognizerEvent} · {dedicatedMode} · {serviceStatus}");
+            $"Micro={microphoneGranted} · ModeloES={modelInstalled} · MotorLocal={engineReady} · Servicio={running} · RMS={rms} · Evento={recognizerEvent} · {dedicatedMode} · {serviceStatus}");
     }
 
     public override void OnRequestPermissionsResult(
