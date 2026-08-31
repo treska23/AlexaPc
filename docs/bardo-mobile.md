@@ -116,8 +116,21 @@ adb shell dpm set-device-owner com.treska23.bardo/com.treska23.bardo.BardoDevice
 
 Para mantenimiento, conviene conservar acceso ADB autorizado desde el PC antes de activar el quiosco.
 
+## Fase futura: Bardo y Alexa en el mismo dispositivo
+
+El OPPO tendrá dos palabras de activación con la pantalla apagada:
+
+```text
+"Bardo" -> control del PC mediante ControlPCIA
+"Alexa" -> funciones del asistente Alexa
+```
+
+La implementación deberá usar un único coordinador del micrófono y de las palabras de activación. Ese coordinador entregará cada conversación al motor correspondiente, evitando que Bardo y Alexa intenten escuchar simultáneamente o se bloqueen entre sí. Cada ruta tendrá una confirmación sonora distinta para que se sepa qué asistente ha respondido sin encender la pantalla.
+
+Esta integración se hará después de validar Bardo 0.2.1 con la pantalla apagada. La vía concreta de Alexa —aplicación instalada o servicio de voz autorizado— se decidirá en esa fase sin alterar el recorrido estable de Bardo.
+
 ## Estado técnico
 
 La versión actual utiliza `SpeechRecognizer` de Android con preferencia por reconocimiento offline. Ya valida el recorrido teléfono -> relay -> agente -> ControlPCIA -> Windows y la transición `Bardo` -> orden.
 
-Las siguientes mejoras previstas son el detector de wake word totalmente local, respuesta hablada y estado del PC en la pantalla del teléfono.
+Las siguientes mejoras previstas son el detector doble de wake word totalmente local, la ruta de Alexa, respuesta hablada y estado del PC en la pantalla del teléfono.
