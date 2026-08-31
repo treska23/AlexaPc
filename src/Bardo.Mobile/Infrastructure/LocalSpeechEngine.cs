@@ -1,0 +1,309 @@
+using Android.Content;
+using Android.Media;
+using SherpaOnnx;
+using System.Diagnostics;
+
+namespace Bardo.Mobile.Infrastructure;
+
+internal sealed record LocalSpeechUtterance(
+    string Text,
+    float PeakRmsDb,
+    TimeSpan Duration);
+
+/// <summary>
+/// Captura audio directamente con AudioRecord y lo transcribe en el propio
+/// teléfono con Moonshine ES + sherpa-onnx. No usa SpeechRecognizer ni necesita
+/// Google/Internet una vez descargado el modelo.
+/// </summary>
+internal sealed class LocalSpeechEngine : IDisposable
+{
+    private const int SampleRate = 16_000;
+    private const int FrameSamples = 320; // 20 ms
+    private const int PreRollFrames = 12; // 240 ms
+    private const int StartFramesRequired = 2;
+    private const int EndSilenceFrames = 24; // 480 ms
+    private const int MinimumSpeechFrames = 7; // 140 ms
+
+    private readonly AudioRecord _audioRecord;
+    private readonly OfflineRecognizer _recognizer;
+    private bool _disposed;
+    private float _noiseFloor = 0.006f;
+
+    private LocalSpeechEngine(AudioRecord audioRecord, OfflineRecognizer recognizer)
+    {
+        _audioRecord = audioRecord;
+        _recognizer = recognizer;
+    }
+
+    public static async Task<LocalSpeechEngine> CreateAsync(
+        Context context,
+        Action<string>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        LocalSpeechModelPaths model = await LocalSpeechModelManager.EnsureInstalledAsync(
+            context,
+            progress,
+            cancellationToken).ConfigureAwait(false);
+
+        progress?.Invoke("Cargando motor español local…");
+
+        var config = new OfflineRecognizerConfig();
+        config.ModelConfig.Moonshine.Encoder = model.Encoder;
+        config.ModelConfig.Moonshine.MergedDecoder = model.Decoder;
+        config.ModelConfig.Tokens = model.Tokens;
+        config.ModelConfig.NumThreads = 2;
+        config.ModelConfig.Provider = "cpu";
+        config.ModelConfig.Debug = 0;
+
+        var recognizer = new OfflineRecognizer(config);
+
+        int minimumBuffer = AudioRecord.GetMinBufferSize(
+            SampleRate,
+            ChannelIn.Mono,
+            Android.Media.Encoding.Pcm16bit);
+        int bufferBytes = Math.Max(minimumBuffer, FrameSamples * sizeof(short) * 8);
+
+        var recorder = new AudioRecord(
+            AudioSource.VoiceRecognition,
+            SampleRate,
+            ChannelIn.Mono,
+            Android.Media.Encoding.Pcm16bit,
+            bufferBytes);
+
+        if (recorder.State != State.Initialized)
+        {
+            recorder.Dispose();
+            recognizer.Dispose();
+            throw new InvalidOperationException("Android no pudo inicializar AudioRecord a 16 kHz.");
+        }
+
+        progress?.Invoke("Motor español local listo");
+        return new LocalSpeechEngine(recorder, recognizer);
+    }
+
+    public async Task<LocalSpeechUtterance?> ListenForUtteranceAsync(
+        TimeSpan? timeout,
+        TimeSpan maximumUtterance,
+        Action<float>? rmsChanged,
+        Action<string>? eventChanged,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        EnsureRecording();
+
+        var overall = Stopwatch.StartNew();
+        var spoken = Stopwatch.StartNew();
+        var frame = new short[FrameSamples];
+        var preRoll = new Queue<short[]>(PreRollFrames);
+        var samples = new List<short>(SampleRate * (int)Math.Ceiling(maximumUtterance.TotalSeconds));
+        bool inSpeech = false;
+        int loudFrames = 0;
+        int silentFrames = 0;
+        int speechFrames = 0;
+        float peakDb = -120f;
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (timeout is not null && !inSpeech && overall.Elapsed >= timeout.Value)
+                {
+                    eventChanged?.Invoke("tiempo de escucha agotado");
+                    return null;
+                }
+
+                int read = _audioRecord.Read(frame, 0, frame.Length);
+                if (read <= 0)
+                {
+                    await Task.Delay(20, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                float rms = CalculateRms(frame, read);
+                float rmsDb = LinearToDb(rms);
+                peakDb = Math.Max(peakDb, rmsDb);
+                rmsChanged?.Invoke(rmsDb);
+
+                float startThreshold = Math.Max(0.0065f, _noiseFloor * 2.15f);
+                float silenceThreshold = Math.Max(0.0045f, _noiseFloor * 1.35f);
+
+                if (!inSpeech)
+                {
+                    // Seguimos el ruido ambiente lentamente para que el teléfono funcione
+                    // igual de noche, con TV encendida o desde otra zona de la habitación.
+                    if (rms < startThreshold)
+                    {
+                        _noiseFloor = Math.Clamp((_noiseFloor * 0.985f) + (rms * 0.015f), 0.0015f, 0.08f);
+                    }
+
+                    EnqueuePreRoll(preRoll, frame, read);
+
+                    if (rms >= startThreshold)
+                    {
+                        loudFrames++;
+                    }
+                    else
+                    {
+                        loudFrames = 0;
+                    }
+
+                    if (loudFrames < StartFramesRequired)
+                    {
+                        continue;
+                    }
+
+                    inSpeech = true;
+                    spoken.Restart();
+                    eventChanged?.Invoke("voz detectada por AudioRecord");
+                    foreach (short[] previousFrame in preRoll)
+                    {
+                        samples.AddRange(previousFrame);
+                    }
+                    preRoll.Clear();
+                }
+
+                samples.AddRange(frame.AsSpan(0, read).ToArray());
+                speechFrames++;
+
+                if (rms <= silenceThreshold)
+                {
+                    silentFrames++;
+                }
+                else
+                {
+                    silentFrames = 0;
+                }
+
+                bool enoughSpeech = speechFrames >= MinimumSpeechFrames;
+                bool endedBySilence = enoughSpeech && silentFrames >= EndSilenceFrames;
+                bool reachedMaximum = spoken.Elapsed >= maximumUtterance;
+
+                if (endedBySilence || reachedMaximum)
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            StopRecording();
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (speechFrames < MinimumSpeechFrames || samples.Count < SampleRate / 8)
+        {
+            eventChanged?.Invoke("fragmento demasiado corto");
+            return null;
+        }
+
+        eventChanged?.Invoke("transcribiendo localmente");
+        string text = await DecodeAsync(samples, cancellationToken).ConfigureAwait(false);
+        eventChanged?.Invoke(string.IsNullOrWhiteSpace(text)
+            ? "transcripción local vacía"
+            : $"local: {text}");
+
+        return string.IsNullOrWhiteSpace(text)
+            ? null
+            : new LocalSpeechUtterance(text.Trim(), peakDb, spoken.Elapsed);
+    }
+
+    private async Task<string> DecodeAsync(
+        IReadOnlyList<short> pcm,
+        CancellationToken cancellationToken)
+    {
+        float[] samples = new float[pcm.Count];
+        for (int i = 0; i < pcm.Count; i++)
+        {
+            samples[i] = pcm[i] / 32768f;
+        }
+
+        return await Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using OfflineStream stream = _recognizer.CreateStream();
+            stream.AcceptWaveform(SampleRate, samples);
+            _recognizer.Decode(stream);
+            return stream.Result.Text ?? string.Empty;
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void EnsureRecording()
+    {
+        if (_audioRecord.RecordingState == RecordState.Recording)
+        {
+            return;
+        }
+
+        _audioRecord.StartRecording();
+        if (_audioRecord.RecordingState != RecordState.Recording)
+        {
+            throw new InvalidOperationException("El micrófono local no ha empezado a grabar.");
+        }
+    }
+
+    private void StopRecording()
+    {
+        try
+        {
+            if (_audioRecord.RecordingState == RecordState.Recording)
+            {
+                _audioRecord.Stop();
+            }
+        }
+        catch
+        {
+            // Dispose hará una segunda limpieza si Android estaba cerrando el servicio.
+        }
+    }
+
+    private static void EnqueuePreRoll(Queue<short[]> queue, short[] source, int count)
+    {
+        queue.Enqueue(source.AsSpan(0, count).ToArray());
+        while (queue.Count > PreRollFrames)
+        {
+            queue.Dequeue();
+        }
+    }
+
+    private static float CalculateRms(short[] samples, int count)
+    {
+        double sum = 0;
+        for (int i = 0; i < count; i++)
+        {
+            double value = samples[i] / 32768.0;
+            sum += value * value;
+        }
+
+        return count == 0 ? 0f : (float)Math.Sqrt(sum / count);
+    }
+
+    private static float LinearToDb(float value) =>
+        20f * MathF.Log10(MathF.Max(value, 0.000001f));
+
+    private void ThrowIfDisposed()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        StopRecording();
+        try
+        {
+            _audioRecord.Release();
+        }
+        catch
+        {
+            // Android puede haber liberado ya el recurso durante el cierre.
+        }
+        _audioRecord.Dispose();
+        _recognizer.Dispose();
+    }
+}
