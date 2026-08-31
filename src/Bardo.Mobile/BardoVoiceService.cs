@@ -22,6 +22,7 @@ public sealed class BardoVoiceService : Service
     private const string LogTag = "BardoVoice";
 
     private readonly RelayCommandClient _relayClient = new();
+    private readonly WakeOnLanClient _wakeOnLanClient = new();
     private readonly CancellationTokenSource _shutdown = new();
 
     private PowerManager.WakeLock? _cpuWakeLock;
@@ -267,6 +268,27 @@ public sealed class BardoVoiceService : Service
         _commandInFlight = true;
         try
         {
+            if (IsWakeComputerCommand(normalizedCommand))
+            {
+                await WakeComputerAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            if (IsShutdownComputerCommand(normalizedCommand))
+            {
+                bool macReady = await EnsurePcMacKnownAsync(cancellationToken).ConfigureAwait(false);
+                if (!macReady)
+                {
+                    SetServiceStatus("No apago el PC hasta guardar su MAC para poder volver a encenderlo");
+                    await Task.Delay(1_200, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                // El agente ya tiene esta acción integrada y programa un apagado limpio
+                // con cinco segundos de margen para devolver la respuesta por el relay.
+                normalizedCommand = "apaga ordenador";
+            }
+
             SetServiceStatus($"Ejecutando: {normalizedCommand}");
             LastRecognizerEvent = $"SEND · {normalizedCommand}";
             Log.Info(LogTag, $"SEND local once: {normalizedCommand}");
@@ -292,6 +314,85 @@ public sealed class BardoVoiceService : Service
             _commandInFlight = false;
         }
     }
+
+    private async Task WakeComputerAsync(CancellationToken cancellationToken)
+    {
+        bool macReady = await EnsurePcMacKnownAsync(cancellationToken).ConfigureAwait(false);
+        if (!macReady)
+        {
+            SetServiceStatus("No conozco la MAC del PC · enciéndelo una vez manualmente para que Bardo pueda aprenderla");
+            await Task.Delay(1_200, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        string mac = WakeOnLanClient.NormalizeMac(_settings.PcMacAddress);
+        SetServiceStatus("Encendiendo ordenador…");
+        LastRecognizerEvent = $"WOL · {mac}";
+        Log.Info(LogTag, $"Enviando Wake-on-LAN a {mac}");
+        await _wakeOnLanClient.WakeAsync(mac, cancellationToken).ConfigureAwait(false);
+        SetServiceStatus("Hecho · señal de encendido enviada al ordenador");
+        await Task.Delay(700, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> EnsurePcMacKnownAsync(CancellationToken cancellationToken)
+    {
+        if (WakeOnLanClient.IsValidMac(_settings.PcMacAddress))
+        {
+            string normalized = WakeOnLanClient.NormalizeMac(_settings.PcMacAddress);
+            if (!string.Equals(normalized, _settings.PcMacAddress, StringComparison.Ordinal))
+            {
+                _settings = _settings with { PcMacAddress = normalized };
+                BardoSettingsStore.Save(this, _settings);
+            }
+
+            return true;
+        }
+
+        SetServiceStatus("Aprendiendo la MAC del ordenador…");
+        LastRecognizerEvent = "WOL · solicitando MAC al agente";
+
+        RelayCommandResult result = await _relayClient.SendAsync(
+            _settings,
+            "mac ordenador",
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Success)
+        {
+            Log.Warn(LogTag, $"No se pudo aprender la MAC: {result.Message}");
+            return false;
+        }
+
+        Match match = Regex.Match(
+            result.Message ?? string.Empty,
+            @"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}",
+            RegexOptions.CultureInvariant);
+
+        if (!match.Success || !WakeOnLanClient.IsValidMac(match.Value))
+        {
+            Log.Warn(LogTag, $"La respuesta del agente no contenía una MAC válida: {result.Message}");
+            return false;
+        }
+
+        string mac = WakeOnLanClient.NormalizeMac(match.Value);
+        _settings = _settings with { PcMacAddress = mac };
+        BardoSettingsStore.Save(this, _settings);
+        LastRecognizerEvent = $"WOL · MAC aprendida {mac}";
+        SetServiceStatus($"Wake-on-LAN preparado · MAC {mac}");
+        Log.Info(LogTag, $"MAC del PC aprendida y guardada: {mac}");
+        return true;
+    }
+
+    private static bool IsWakeComputerCommand(string command) =>
+        Regex.IsMatch(
+            command,
+            @"\b(?:enciende|encender|despierta|despertar|arranca|arrancar)\b.*\b(?:ordenador|computadora|pc|equipo)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static bool IsShutdownComputerCommand(string command) =>
+        Regex.IsMatch(
+            command,
+            @"\b(?:apaga|apagar)\b.*\b(?:ordenador|computadora|pc|equipo)\b",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     private string NormalizeCommand(string command)
     {
