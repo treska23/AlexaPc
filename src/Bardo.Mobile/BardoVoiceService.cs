@@ -321,6 +321,9 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
     public void OnBufferReceived(byte[]? buffer) { }
     public void OnEndOfSpeech() { }
     public void OnEvent(int eventType, Bundle? @params) { }
+    public void OnSegmentResults(Bundle segmentResults) { }
+    public void OnEndOfSegmentedSession() { }
+    public void OnLanguageDetection(Bundle results) { }
 
     private enum ListeningMode
     {
