@@ -30,12 +30,13 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
     private bool _destroyed;
     private bool _waitingForResult;
     private bool _usingOnDeviceRecognizer;
-    private bool _wakeWordSeenInPartial;
+    private bool _ignoreNextRecognizerError;
 
     public static bool IsRunning { get; private set; }
     public static string CurrentStatus { get; private set; } = "detenido";
     public static float LastRmsDb { get; private set; } = float.NaN;
     public static string LastRecognizerEvent { get; private set; } = "sin eventos";
+    public static event Action<string>? StatusChanged;
 
     public override void OnCreate()
     {
@@ -65,10 +66,6 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
                 return;
             }
 
-            // Para el MVP preferimos el reconocedor estándar del sistema. Algunos
-            // fabricantes anuncian reconocimiento local disponible aunque el modelo
-            // de español no esté realmente preparado y el reconocedor queda mudo.
-            // El motor local de wake word se añadirá después de validar el circuito.
             if (standardAvailable)
             {
                 _recognizer = SpeechRecognizer.CreateSpeechRecognizer(this);
@@ -88,7 +85,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
 
             _recognizer.SetRecognitionListener(this);
             _recognizerIntent = BuildRecognizerIntent();
-            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {(_usingOnDeviceRecognizer ? "local" : "sistema")}");
+            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
             ScheduleListen(300);
         }
         catch (Exception ex)
@@ -109,9 +106,9 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         }
 
         _settings = BardoSettingsStore.Load(this);
-        if (_recognizer is not null)
+        if (_recognizer is not null && _mode == ListeningMode.WakeWord)
         {
-            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {(_usingOnDeviceRecognizer ? "local" : "sistema")}");
+            SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
             ScheduleListen(150);
         }
 
@@ -125,6 +122,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         IsRunning = false;
         CurrentStatus = "detenido";
         LastRecognizerEvent = "servicio detenido";
+        StatusChanged?.Invoke(CurrentStatus);
         _destroyed = true;
         _shutdown.Cancel();
         _handler?.RemoveCallbacksAndMessages(null);
@@ -143,6 +141,8 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         _shutdown.Dispose();
         base.OnDestroy();
     }
+
+    private string RecognizerLabel => _usingOnDeviceRecognizer ? "local" : "sistema";
 
     private Intent BuildRecognizerIntent()
     {
@@ -175,9 +175,9 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         try
         {
             _waitingForResult = true;
-            LastRecognizerEvent = "StartListening";
+            LastRecognizerEvent = $"StartListening ({_mode})";
             _recognizer.StartListening(_recognizerIntent);
-            Log.Debug(LogTag, "StartListening");
+            Log.Debug(LogTag, $"StartListening mode={_mode}");
         }
         catch (Exception ex)
         {
@@ -194,46 +194,29 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         _waitingForResult = false;
         var text = GetBestResult(results);
         LastRecognizerEvent = $"resultado: {text ?? "<vacío>"}";
-        Log.Info(LogTag, $"Resultado: {text ?? "<vacío>"}");
+        Log.Info(LogTag, $"Resultado: {text ?? "<vacío>"} · mode={_mode}");
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            if (_mode == ListeningMode.WakeWord && _wakeWordSeenInPartial)
-            {
-                EnterCommandMode();
-                return;
-            }
-
             ScheduleListen(250);
             return;
         }
 
         if (_mode == ListeningMode.WakeWord)
         {
-            if (TryExtractWakeCommand(text, out var command))
+            if (!TryExtractWakeCommand(text, out var command))
             {
-                _wakeWordSeenInPartial = false;
-
-                if (!string.IsNullOrWhiteSpace(command))
-                {
-                    _ = ExecuteCommandAndResumeAsync(command);
-                    return;
-                }
-
-                EnterCommandMode();
+                ScheduleListen(200);
                 return;
             }
 
-            // Algunos reconocedores anuncian correctamente la wake word en el
-            // resultado parcial y después entregan un resultado final vacío o
-            // ligeramente distinto. Si ya vimos «Bardo», respetamos esa detección.
-            if (_wakeWordSeenInPartial)
+            if (!string.IsNullOrWhiteSpace(command))
             {
-                EnterCommandMode();
+                _ = ExecuteCommandAndResumeAsync(command);
                 return;
             }
 
-            ScheduleListen(200);
+            EnterCommandMode();
             return;
         }
 
@@ -249,28 +232,33 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         }
 
         LastRecognizerEvent = $"parcial: {text}";
-        Log.Debug(LogTag, $"Parcial: {text}");
+        Log.Debug(LogTag, $"Parcial: {text} · mode={_mode}");
 
         if (_mode != ListeningMode.WakeWord || !ContainsWakeWord(text))
         {
             return;
         }
 
-        _wakeWordSeenInPartial = true;
-        SetServiceStatus("Bardo detectado · cerrando frase…");
+        // En este OPPO la wake word llega correctamente como resultado parcial,
+        // pero el resultado final puede tardar o no provocar la transición. En cuanto
+        // vemos «Bardo» damos la detección por válida, cancelamos esa sesión y abrimos
+        // una sesión nueva dedicada al comando.
+        LastRecognizerEvent = $"wake word detectada en parcial: {text}";
+        _mode = ListeningMode.Command;
+        _waitingForResult = false;
+        _ignoreNextRecognizerError = true;
+        SetServiceStatus("Bardo detectado · di el comando");
 
-        // En el OPPO el reconocedor puede quedarse entregando parciales sin cerrar
-        // la frase por sí solo. StopListening fuerza la finalización y OnResults (o
-        // OnError como fallback) hará la transición real al modo de comando.
         try
         {
-            _recognizer?.StopListening();
+            _recognizer?.Cancel();
         }
         catch (Exception ex)
         {
-            Log.Warn(LogTag, $"StopListening tras wake word falló: {ex.Message}");
-            EnterCommandMode();
+            Log.Warn(LogTag, $"Cancel tras wake word falló: {ex.Message}");
         }
+
+        ScheduleListen(550);
     }
 
     public void OnError(SpeechRecognizerError error)
@@ -282,14 +270,13 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             return;
         }
 
-        LastRecognizerEvent = $"error: {error}";
-        Log.Warn(LogTag, $"SpeechRecognizer error: {error}");
+        LastRecognizerEvent = $"error: {error} · mode={_mode}";
+        Log.Warn(LogTag, $"SpeechRecognizer error: {error} · mode={_mode}");
 
-        // Si el error aparece después de haber detectado «Bardo» en un parcial,
-        // no perdemos la wake word: pasamos directamente a escuchar el comando.
-        if (_mode == ListeningMode.WakeWord && _wakeWordSeenInPartial)
+        if (_ignoreNextRecognizerError)
         {
-            EnterCommandMode();
+            _ignoreNextRecognizerError = false;
+            ScheduleListen(_mode == ListeningMode.Command ? 450 : 200);
             return;
         }
 
@@ -298,26 +285,22 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             SetServiceStatus($"Voz: {error} · reintentando");
         }
 
-        var delay = error == SpeechRecognizerError.RecognizerBusy ? 1400 : 450;
-        ScheduleListen(delay);
+        ScheduleListen(error == SpeechRecognizerError.RecognizerBusy ? 1400 : 450);
     }
 
     private void EnterCommandMode()
     {
-        _wakeWordSeenInPartial = false;
         _mode = ListeningMode.Command;
         _waitingForResult = false;
         SetServiceStatus("Bardo detectado · di el comando");
-        ScheduleListen(180);
+        ScheduleListen(300);
     }
 
     private async Task ExecuteCommandAndResumeAsync(string command)
     {
         if (string.IsNullOrWhiteSpace(command))
         {
-            _mode = ListeningMode.WakeWord;
-            _wakeWordSeenInPartial = false;
-            ScheduleListen(200);
+            ReturnToWakeWord();
             return;
         }
 
@@ -344,10 +327,16 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
             return;
         }
 
+        ReturnToWakeWord();
+    }
+
+    private void ReturnToWakeWord()
+    {
         _mode = ListeningMode.WakeWord;
-        _wakeWordSeenInPartial = false;
-        SetServiceStatus($"Esperando «{_settings.WakeWord}» · {(_usingOnDeviceRecognizer ? "local" : "sistema")}");
-        ScheduleListen(150);
+        _waitingForResult = false;
+        _ignoreNextRecognizerError = false;
+        SetServiceStatus($"Esperando «{_settings.WakeWord}» · {RecognizerLabel}");
+        ScheduleListen(200);
     }
 
     private bool TryExtractWakeCommand(string text, out string command)
@@ -421,6 +410,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         CurrentStatus = message;
         Log.Info(LogTag, message);
         UpdateNotification(message);
+        StatusChanged?.Invoke(message);
     }
 
     private void UpdateNotification(string message)
@@ -451,14 +441,14 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
 
     public void OnReadyForSpeech(Bundle? @params)
     {
-        LastRecognizerEvent = "micrófono listo";
-        Log.Debug(LogTag, "Micrófono listo");
+        LastRecognizerEvent = $"micrófono listo · mode={_mode}";
+        Log.Debug(LogTag, LastRecognizerEvent);
     }
 
     public void OnBeginningOfSpeech()
     {
-        LastRecognizerEvent = "voz detectada";
-        Log.Debug(LogTag, "Inicio de voz");
+        LastRecognizerEvent = $"voz detectada · mode={_mode}";
+        Log.Debug(LogTag, LastRecognizerEvent);
     }
 
     public void OnRmsChanged(float rmsdB)
@@ -470,8 +460,8 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
 
     public void OnEndOfSpeech()
     {
-        LastRecognizerEvent = "fin de voz";
-        Log.Debug(LogTag, "Fin de voz");
+        LastRecognizerEvent = $"fin de voz · mode={_mode}";
+        Log.Debug(LogTag, LastRecognizerEvent);
     }
 
     public void OnEvent(int eventType, Bundle? @params) { }
