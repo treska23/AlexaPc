@@ -44,6 +44,12 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         }
 
         _recognizer = SpeechRecognizer.CreateSpeechRecognizer(this);
+        if (_recognizer is null)
+        {
+            UpdateNotification("No se pudo iniciar el reconocimiento de voz");
+            return;
+        }
+
         _recognizer.SetRecognitionListener(this);
         _recognizerIntent = BuildRecognizerIntent();
         ScheduleListen(300);
@@ -213,7 +219,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         {
             await Task.Delay(900, _shutdown.Token);
         }
-        catch (OperationCanceledException)
+        catch (System.OperationCanceledException)
         {
             return;
         }
@@ -309,7 +315,7 @@ public sealed class BardoVoiceService : Service, IRecognitionListener
         return new Notification.Builder(this, ChannelId)
             .SetContentTitle("Bardo")
             .SetContentText(message)
-            .SetSmallIcon(Android.Resource.Drawable.IcBtnSpeakNow)
+            .SetSmallIcon(Android.Resource.Drawable.IcDialogInfo)
             .SetOngoing(true)
             .AddAction(Android.Resource.Drawable.IcDelete, "Parar", stopPendingIntent)
             .Build();
