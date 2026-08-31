@@ -47,7 +47,7 @@ public sealed class BardoApplication : Application
             // El primer tono (PropAck) confirma la wake word. Este segundo tono,
             // distinto y más corto, confirma que la orden ya ha sido entendida y
             // enviada al PC.
-            _commandAcknowledgementTone ??= new ToneGenerator(Stream.Alarm, 85);
+            _commandAcknowledgementTone ??= new ToneGenerator(Android.Media.Stream.Alarm, 85);
             _commandAcknowledgementTone.StopTone();
             _commandAcknowledgementTone.StartTone(Tone.PropBeep, 130);
             Log.Info(LogTag, "Tono de orden entendida reproducido");
