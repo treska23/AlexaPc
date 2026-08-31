@@ -19,10 +19,10 @@ internal sealed class LocalSpeechEngine : IDisposable
 {
     private const int SampleRate = 16_000;
     private const int FrameSamples = 320; // 20 ms
-    private const int PreRollFrames = 12; // 240 ms
+    private const int PreRollFrames = 20; // 400 ms: conserva consonantes/sílabas iniciales al hablar rápido.
     private const int StartFramesRequired = 2;
-    private const int EndSilenceFrames = 24; // 480 ms
-    private const int MinimumSpeechFrames = 7; // 140 ms
+    private const int EndSilenceFrames = 36; // 720 ms: tolera pausas naturales dentro de una orden.
+    private const int MinimumSpeechFrames = 5; // 100 ms
 
     private readonly AudioRecord _audioRecord;
     private readonly OfflineRecognizer _recognizer;
@@ -124,8 +124,10 @@ internal sealed class LocalSpeechEngine : IDisposable
                 peakDb = Math.Max(peakDb, rmsDb);
                 rmsChanged?.Invoke(rmsDb);
 
-                float startThreshold = Math.Max(0.0065f, _noiseFloor * 2.15f);
-                float silenceThreshold = Math.Max(0.0045f, _noiseFloor * 1.35f);
+                // Más tolerante que la primera versión: antes exigíamos ~2.15x el ruido
+                // ambiente y se podían perder ataques suaves al hablar deprisa.
+                float startThreshold = Math.Max(0.0052f, _noiseFloor * 1.75f);
+                float silenceThreshold = Math.Max(0.0038f, _noiseFloor * 1.20f);
 
                 if (!inSpeech)
                 {
