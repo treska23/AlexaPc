@@ -17,7 +17,7 @@ Alexa, dile a Bardo Control que abra YouTube.
 
 Alexa aporta `dile a`, el nombre de invocación y el conector `que`. La parte que
 debe resolver el modelo de la Skill es `abra YouTube`, que coincide con la muestra
-`abra {command}`. Por ese motivo no se incluye `que abra {command}`: obligaría a
+`abra {target}` de `OpenComputerIntent`. Por ese motivo no se incluye `que abra {target}`: obligaría a
 entrenar una duplicación artificial del conector.
 
 El fallo anterior ocurría antes de Lambda. La prueba es que no había respuesta ni
@@ -44,7 +44,7 @@ Alexa, abre Bardo Control para abrir YouTube.
 ```
 
 Las dos primeras siguen literalmente las formas documentadas por Amazon. La
-tercera combina `Abre <nombre> para <acción>` con la muestra `abrir {command}`.
+tercera combina `Abre <nombre> para <acción>` con la muestra `abrir {target}`.
 
 `Alexa, Bardo Control` abre la Skill, pero no incluye una intención. La forma
 `Alexa, Bardo abre YouTube` no es una invocación directa documentada para `es-ES`.
@@ -54,10 +54,15 @@ base estable para este proyecto.
 ## Por qué se conserva AMAZON.SearchQuery
 
 `AMAZON.SearchQuery` está disponible en español de España y está pensado para texto
-poco predecible. AlexaPc admite nombres configurables en `commands.json`, así que
-un slot abierto conserva esa extensibilidad. Amazon exige que cada muestra con
-`AMAZON.SearchQuery` tenga una frase portadora; todas las muestras la tienen, por
-ejemplo `abre {command}` o `ejecuta {command}`.
+poco predecible. AlexaPc puede recibir nombres de aplicaciones, búsquedas y órdenes
+que no caben en una lista cerrada, así que los slots abiertos conservan esa
+extensibilidad. Amazon no incluye la frase portadora en el valor del slot: por eso
+cada familia de verbos tiene su propio intent y Lambda vuelve a unir ambos elementos.
+Por ejemplo, `OpenComputerIntent` con el slot `Chrome` produce `abre Chrome`.
+
+Amazon exige además que cada muestra con `AMAZON.SearchQuery` tenga una frase
+portadora; todas las muestras la tienen, por ejemplo `abre {target}`, `busca
+{query}` o `maximiza {target}`.
 
 Cambiar a un slot personalizado podría mejorar el reconocimiento de una lista fija,
 pero no solucionaría una petición que no llega a invocar la Skill. También obligaría
@@ -69,14 +74,14 @@ El código de Lambda registra una sola línea JSON segura por solicitud. Ejemplo
 
 ```json
 {"component":"AlexaPc.Skill","event":"request","requestType":"LaunchRequest","requestId":"...","locale":"es-ES","intentName":null,"command":null}
-{"component":"AlexaPc.Skill","event":"request","requestType":"IntentRequest","requestId":"...","locale":"es-ES","intentName":"ExecuteCommandIntent","command":"YouTube"}
+{"component":"AlexaPc.Skill","event":"request","requestType":"IntentRequest","requestId":"...","locale":"es-ES","intentName":"OpenComputerIntent","command":"abre YouTube"}
 ```
 
 No se registran la API key, la URL del relay ni el identificador del dispositivo.
 
 - Si no aparece ninguna línea, Alexa no ha enrutado la frase a la Skill.
 - Si aparece `LaunchRequest`, Alexa abrió la Skill sin resolver la acción.
-- Si aparece `IntentRequest` con `ExecuteCommandIntent`, la invocación one-shot ya
+- Si aparece `IntentRequest` con un intent de acción y el verbo reconstruido, la invocación one-shot ya
   está resuelta y cualquier fallo posterior pertenece a Lambda, relay u ordenador.
 
 ## Fuentes oficiales consultadas

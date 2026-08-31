@@ -6,6 +6,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AlexaPc.Agent", "src\AlexaP
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AlexaPc.Relay", "src\AlexaPc.Relay\AlexaPc.Relay.csproj", "{A31F8C66-24E5-46A7-9B6B-3D4FD1D55C42}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AlexaPc.Control", "src\AlexaPc.Control\AlexaPc.Control.csproj", "{FA585A9F-EDD6-4D82-94DA-BD268D2163A2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AlexaPc.Control.Tests", "tests\AlexaPc.Control.Tests\AlexaPc.Control.Tests.csproj", "{7A10F663-9C46-4A98-A15A-8B97EBAF1406}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -20,5 +24,13 @@ Global
 		{A31F8C66-24E5-46A7-9B6B-3D4FD1D55C42}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A31F8C66-24E5-46A7-9B6B-3D4FD1D55C42}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A31F8C66-24E5-46A7-9B6B-3D4FD1D55C42}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FA585A9F-EDD6-4D82-94DA-BD268D2163A2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FA585A9F-EDD6-4D82-94DA-BD268D2163A2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FA585A9F-EDD6-4D82-94DA-BD268D2163A2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FA585A9F-EDD6-4D82-94DA-BD268D2163A2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7A10F663-9C46-4A98-A15A-8B97EBAF1406}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7A10F663-9C46-4A98-A15A-8B97EBAF1406}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7A10F663-9C46-4A98-A15A-8B97EBAF1406}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7A10F663-9C46-4A98-A15A-8B97EBAF1406}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

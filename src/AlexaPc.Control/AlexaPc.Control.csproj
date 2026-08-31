@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>ControlPCIA</RootNamespace>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;bin\**</DefaultItemExcludes>
+    <!-- NU1510 is expected: the explicit package reference pins a patched version. -->
+    <NoWarn>$(NoWarn);NU1510</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.298" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.PowerShell.SDK" Version="7.6.3" />
+    <!-- Keep the patched framework package above PowerShell SDK's vulnerable transitive 10.0.6. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.Windows.SDK.NET.Ref" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="AlexaPc.Control.Tests" />
+  </ItemGroup>
+</Project>

@@ -42,10 +42,12 @@ public partial class App : System.Windows.Application
         var relayConfigurationService = new RelayConfigurationService();
         var assistantConfigurationService = new AssistantConfigurationService();
         var executionService = new CommandExecutionService(_log);
+        var generalControlService = new GeneralComputerControlService(_log);
         var llamaService = new LocalLlamaService(assistantConfigurationService, _log);
         var assistantService = new LocalAssistantService(
             configurationService,
             executionService,
+            generalControlService,
             llamaService,
             _log);
         var dispatcher = new CommandDispatcher(configurationService, executionService, assistantService, _log);
@@ -89,6 +91,7 @@ public partial class App : System.Windows.Application
 
         new DesktopShortcutService().EnsureShortcuts();
         _relayClient.Start();
+        _ = generalControlService.WarmUpAsync();
         _ = llamaService.WarmUpAsync();
     }
 

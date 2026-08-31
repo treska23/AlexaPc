@@ -26,6 +26,278 @@
           ]
         },
         {
+          "name": "OpenComputerIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "abre {target}",
+            "abra {target}",
+            "abrir {target}",
+            "ejecuta {target}",
+            "ejecute {target}",
+            "ejecutar {target}",
+            "inicia {target}",
+            "inicie {target}",
+            "iniciar {target}",
+            "lanza {target}",
+            "lance {target}",
+            "lanzar {target}"
+          ]
+        },
+        {
+          "name": "CloseComputerIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "cierra {target}",
+            "cierre {target}",
+            "cerrar {target}"
+          ]
+        },
+        {
+          "name": "SearchComputerIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "busca {query}",
+            "busque {query}",
+            "buscar {query}",
+            "encuentra {query}",
+            "encuentre {query}",
+            "encontrar {query}",
+            "averigua {query}"
+          ]
+        },
+        {
+          "name": "SetComputerIntent",
+          "slots": [
+            {
+              "name": "instruction",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "pon {instruction}",
+            "ponga {instruction}",
+            "poner {instruction}",
+            "configura {instruction}",
+            "configure {instruction}",
+            "configurar {instruction}"
+          ]
+        },
+        {
+          "name": "ChangeComputerIntent",
+          "slots": [
+            {
+              "name": "instruction",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "cambia {instruction}",
+            "cambie {instruction}",
+            "cambiar {instruction}"
+          ]
+        },
+        {
+          "name": "ActivateComputerIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "activa {target}",
+            "active {target}",
+            "activar {target}"
+          ]
+        },
+        {
+          "name": "DeactivateComputerIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "desactiva {target}",
+            "desactive {target}",
+            "desactivar {target}"
+          ]
+        },
+        {
+          "name": "MaximizeWindowIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "maximiza {target}",
+            "maximice {target}",
+            "maximizar {target}"
+          ]
+        },
+        {
+          "name": "MinimizeWindowIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "minimiza {target}",
+            "minimice {target}",
+            "minimizar {target}"
+          ]
+        },
+        {
+          "name": "RestoreWindowIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "restaura {target}",
+            "restaure {target}",
+            "restaurar {target}"
+          ]
+        },
+        {
+          "name": "BringWindowIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "trae {target} al frente",
+            "traiga {target} al frente",
+            "traer {target} al frente",
+            "trae al frente {target}",
+            "traiga al frente {target}"
+          ]
+        },
+        {
+          "name": "PlaceWindowIntent",
+          "slots": [
+            {
+              "name": "instruction",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "coloca {instruction}",
+            "coloque {instruction}",
+            "colocar {instruction}",
+            "mueve {instruction}",
+            "mueva {instruction}",
+            "mover {instruction}"
+          ]
+        },
+        {
+          "name": "DuplicateDisplaysIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "duplica {target}",
+            "duplique {target}",
+            "duplicar {target}"
+          ]
+        },
+        {
+          "name": "ExtendDisplaysIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "extiende {target}",
+            "extienda {target}",
+            "extender {target}"
+          ]
+        },
+        {
+          "name": "RotateDisplayIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "gira {target}",
+            "gire {target}",
+            "girar {target}"
+          ]
+        },
+        {
+          "name": "ForwardMediaIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "adelanta {target}",
+            "adelante {target}",
+            "adelantar {target}"
+          ]
+        },
+        {
+          "name": "RewindMediaIntent",
+          "slots": [
+            {
+              "name": "target",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "retrocede {target}",
+            "retroceda {target}",
+            "retroceder {target}"
+          ]
+        },
+        {
+          "name": "WhatComputerIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "qué {query}",
+            "que {query}"
+          ]
+        },
+        {
           "name": "ExecuteCommandIntent",
           "slots": [
             {
@@ -34,38 +306,21 @@
             }
           ],
           "samples": [
-            "abre {command}",
-            "abra {command}",
-            "abrir {command}",
-            "ejecuta {command}",
-            "ejecute {command}",
-            "ejecutar {command}",
-            "inicia {command}",
-            "inicie {command}",
-            "iniciar {command}",
-            "pon {command}",
-            "ponga {command}",
-            "poner {command}",
-            "haz {command}",
-            "haga {command}",
-            "hacer {command}",
-            "lanza {command}",
-            "lance {command}",
-            "lanzar {command}",
+            "quiero que {command}",
             "quiero {command}",
+            "necesito que {command}",
             "necesito {command}",
             "puedes {command}",
             "podrías {command}",
             "podrias {command}",
-            "ayúdame con {command}",
-            "ayudame con {command}",
+            "haz {command}",
+            "haga {command}",
+            "hacer {command}",
+            "por favor {command}",
+            "ayúdame a {command}",
+            "ayudame a {command}",
             "dime {command}",
-            "me diga {command}",
-            "explícame {command}",
-            "explicame {command}",
-            "me explique {command}",
-            "busca {command}",
-            "averigua {command}"
+            "me diga {command}"
           ]
         },
         {

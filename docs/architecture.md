@@ -1,28 +1,45 @@
 # Arquitectura
 
-## Flujo previsto
+## Flujo actual
 
 ```text
 Voz
   ↓
-Alexa
-  ↓
-Alexa Skill
-  ↓
-AlexaPc.Relay
-  ↓  WebSocket seguro y persistente
-AlexaPc.Agent (Windows)
-  ↓
-CommandDispatcher
+Alexa Skill · Bardo Control
+  ↓ HTTPS
+Cloudflare Worker
+  ↓ WebSocket persistente
+AlexaPc.Agent
+  ├─ comando exacto → CommandExecutionService
+  ├─ energía → catálogo protegido
+  └─ lenguaje natural → AlexaPc.Control
+                         ├─ control determinista
+                         └─ traducción local con Qwen
   ↓
 Windows
 ```
 
-## Por qué separar Relay y Agent
+El ordenador inicia la conexión saliente al relay; no expone ningún puerto a Internet. El Worker correlaciona cada orden y su respuesta mediante un `requestId` y limpia la petición aunque haya un error o timeout.
 
-El agente de Windows no debe depender de la implementación concreta de Alexa. El `CommandDispatcher` recibe un nombre de comando y lo ejecuta. Hoy puede invocarlo la interfaz local; mañana lo invocará un mensaje WebSocket sin cambiar la lógica que controla Windows.
+## Proyecto unificado
 
-El ordenador iniciará la conexión saliente al relay. No será necesario exponer un puerto del equipo a Internet.
+`AlexaPc.Control` contiene dentro de esta solución el núcleo estable de ControlPCIA. Se enlaza como biblioteca con `AlexaPc.Agent`, por lo que Alexa no lanza ni se comunica con un segundo ejecutable.
+
+El servidor móvil y la APK del proyecto original quedan fuera de esta integración. El ejecutable independiente de ControlPCIA puede seguir abierto para sus propios usos, pero AlexaPc no depende de él.
+
+## Interpretación
+
+La Skill reconstruye verbos que `AMAZON.SearchQuery` no incluye en el valor del slot. Por ejemplo:
+
+```text
+OpenComputerIntent + «Chrome»
+  → «abre Chrome»
+
+WhatComputerIntent + «programas tengo abiertos»
+  → «qué programas tengo abiertos»
+```
+
+El agente mantiene primero el catálogo exacto para acciones inmediatas y de energía. El resto pasa al controlador general: aplicaciones, web, ventanas, pantallas, multimedia, consultas y órdenes encadenadas. Las rutas conocidas no consultan ningún modelo; Qwen solo traduce localmente lo que el núcleo determinista no reconoce.
 
 ## Mensaje remoto
 
@@ -30,7 +47,7 @@ El ordenador iniciará la conexión saliente al relay. No será necesario expone
 {
   "type": "execute",
   "requestId": "f4d4f631-5897-47b4-953a-3d4ad5d759dc",
-  "command": "pausa"
+  "command": "maximiza Spotify y baja el volumen"
 }
 ```
 
@@ -41,26 +58,27 @@ Respuesta:
   "type": "result",
   "requestId": "f4d4f631-5897-47b4-953a-3d4ad5d759dc",
   "success": true,
-  "message": "Reproducción pausada."
+  "message": "[bardo] He completado las dos acciones."
 }
 ```
 
-El Worker mantiene una entrada pendiente por `requestId`. El agente procesa mensajes en tareas independientes y serializa únicamente los envíos WebSocket, de modo que un comando exacto no queda bloqueado por una inferencia local. Las inferencias sí se serializan para no competir por GPU; su espera forma parte del límite local de 5 segundos.
+## Concurrencia y tiempos
 
-Cada petición termina en un mensaje `result`, incluso cuando la ejecución devuelve error, se cancela o lanza una excepción. Si el socket se pierde o no llega ningún resultado, el Durable Object completa y limpia la petición pendiente con un error controlado.
+El agente procesa mensajes remotos en tareas independientes y serializa únicamente los envíos WebSocket. Una orden exacta no queda bloqueada por una traducción local. Los límites están anidados para devolver un error antes de que Alexa agote su presupuesto:
 
-## Seguridad prevista
+```text
+control local:       4.800 ms
+Cloudflare Worker:   6.200 ms
+Lambda:              7.200 ms
+Alexa:               menos de 8.000 ms
+```
+
+## Seguridad
 
 - TLS en todo el transporte remoto.
-- Identificador propio para cada agente.
-- Token de dispositivo revocable.
-- Lista blanca de comandos: el relay envía nombres, no código arbitrario.
-- El agente solo ejecuta comandos existentes en su `commands.json`.
-
-## Próxima fase
-
-1. Añadir ejecución en bandeja y arranque con Windows.
-2. Crear `AlexaPc.Relay`.
-3. Conectar el agente al relay mediante WebSocket.
-4. Implementar la Alexa Skill.
-5. Añadir Wake-on-LAN desde Alexa para el encendido en frío.
+- API key del relay y token de dispositivo revocables.
+- Ninguna clave privada se guarda en Git.
+- El relay transporta texto, nunca código generado por Internet.
+- Las órdenes conocidas usan controladores deterministas.
+- Las traducciones locales pasan por validadores que bloquean eliminaciones, movimientos, cortes, desinstalaciones y operaciones destructivas de disco.
+- Apagar, reiniciar, suspender y bloquear requieren una petición explícita y permanecen fuera del controlador general.

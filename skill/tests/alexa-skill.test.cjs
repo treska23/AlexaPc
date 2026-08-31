@@ -81,32 +81,40 @@ function loadAlexaHostedTemplate() {
 test('interaction model supports documented and natural Spanish one-shot actions', () => {
   const model = JSON.parse(readStrictUtf8(modelPath));
   const languageModel = model.interactionModel.languageModel;
-  const intent = languageModel.intents.find(({ name }) => name === 'ExecuteCommandIntent');
+  const intents = new Map(languageModel.intents.map(item => [item.name, item]));
+  const intent = intents.get('ExecuteCommandIntent');
 
   assert.equal(languageModel.invocationName, 'bardo control');
   assert.equal(intent.slots[0].type, 'AMAZON.SearchQuery');
-  assert.ok(intent.samples.includes('abra {command}'));
-  assert.ok(intent.samples.includes('abre {command}'));
+  assert.ok(intent.samples.includes('quiero que {command}'));
   assert.ok(intent.samples.includes('quiero {command}'));
+  assert.ok(intent.samples.includes('necesito que {command}'));
   assert.ok(intent.samples.includes('necesito {command}'));
-  assert.ok(intent.samples.includes('dime {command}'));
-  assert.ok(intent.samples.includes('me diga {command}'));
-  assert.equal(intent.samples.includes('que abra {command}'), false);
+  assert.ok(intent.samples.includes('por favor {command}'));
+  assert.equal(intent.samples.includes('abre {command}'), false);
+  assert.equal(intent.samples.includes('busca {command}'), false);
 
-  const whatIntent = languageModel.intents.find(({ name }) => name === 'WhatIsIntent');
-  const whyIntent = languageModel.intents.find(({ name }) => name === 'WhyQuestionIntent');
+  assert.equal(intents.get('OpenComputerIntent').slots[0].type, 'AMAZON.SearchQuery');
+  assert.ok(intents.get('OpenComputerIntent').samples.includes('abre {target}'));
+  assert.ok(intents.get('CloseComputerIntent').samples.includes('cierra {target}'));
+  assert.ok(intents.get('SearchComputerIntent').samples.includes('busca {query}'));
+  assert.ok(intents.get('MaximizeWindowIntent').samples.includes('maximiza {target}'));
+  assert.ok(intents.get('BringWindowIntent').samples.includes('trae {target} al frente'));
+  assert.ok(intents.get('WhatComputerIntent').samples.includes('qué {query}'));
+
+  const whatIntent = intents.get('WhatIsIntent');
+  const whyIntent = intents.get('WhyQuestionIntent');
   assert.equal(whatIntent.slots[0].type, 'AMAZON.SearchQuery');
   assert.ok(whatIntent.samples.includes('qué es {topic}'));
   assert.ok(whyIntent.samples.includes('por qué {subject}'));
 
-  const fixedIntents = new Map(languageModel.intents.map(item => [item.name, item]));
-  assert.ok(fixedIntents.has('AMAZON.PauseIntent'));
-  assert.ok(fixedIntents.has('AMAZON.ResumeIntent'));
-  assert.ok(fixedIntents.get('MediaPlayIntent').samples.includes('reproduce'));
-  assert.ok(fixedIntents.get('ShutdownComputerIntent').samples.includes('apaga el ordenador'));
-  assert.ok(fixedIntents.get('RestartComputerIntent').samples.includes('reinicia el ordenador'));
-  assert.ok(fixedIntents.get('SleepComputerIntent').samples.includes('suspende el ordenador'));
-  assert.ok(fixedIntents.get('LockComputerIntent').samples.includes('bloquea el ordenador'));
+  assert.ok(intents.has('AMAZON.PauseIntent'));
+  assert.ok(intents.has('AMAZON.ResumeIntent'));
+  assert.ok(intents.get('MediaPlayIntent').samples.includes('reproduce'));
+  assert.ok(intents.get('ShutdownComputerIntent').samples.includes('apaga el ordenador'));
+  assert.ok(intents.get('RestartComputerIntent').samples.includes('reinicia el ordenador'));
+  assert.ok(intents.get('SleepComputerIntent').samples.includes('suspende el ordenador'));
+  assert.ok(intents.get('LockComputerIntent').samples.includes('bloquea el ordenador'));
 
   for (const sample of intent.samples) {
     assert.notEqual(sample.trim(), '{command}', 'AMAZON.SearchQuery needs a carrier phrase');
@@ -126,6 +134,27 @@ test('normalization keeps command aliases compatible with commands.json', () => 
   assert.equal(exports._test.commandForIntent('AMAZON.PauseIntent'), 'pausa');
   assert.equal(exports._test.commandForIntent('AMAZON.HelpIntent'), null);
   assert.equal(
+    exports._test.commandForActionIntent({
+      name: 'OpenComputerIntent',
+      slots: { target: { value: 'Google Chrome' } }
+    }),
+    'abre Google Chrome'
+  );
+  assert.equal(
+    exports._test.commandForActionIntent({
+      name: 'BringWindowIntent',
+      slots: { target: { value: 'Microsoft Edge' } }
+    }),
+    'trae Microsoft Edge al frente'
+  );
+  assert.equal(
+    exports._test.commandForActionIntent({
+      name: 'WhatComputerIntent',
+      slots: { query: { value: 'programas tengo abiertos' } }
+    }),
+    'qué programas tengo abiertos'
+  );
+  assert.equal(
     exports._test.commandForQuestionIntent({
       name: 'WhatIsIntent',
       slots: { topic: { value: 'un agujero negro' } }
@@ -143,6 +172,13 @@ test('environment-based Lambda keeps the same normalization behavior', async () 
   assert.equal(lambda.normalizeCommand('Apaga el PC'), 'apaga ordenador');
   assert.equal(lambda.normalizeCommand('mi comando personalizado'), 'mi comando personalizado');
   assert.equal(lambda.commandForIntent('SleepComputerIntent'), 'suspende ordenador');
+  assert.equal(
+    lambda.commandForActionIntent({
+      name: 'SearchComputerIntent',
+      slots: { query: { value: 'vídeos de jazz' } }
+    }),
+    'busca vídeos de jazz'
+  );
   assert.equal(
     lambda.commandForQuestionIntent({
       name: 'WhyQuestionIntent',

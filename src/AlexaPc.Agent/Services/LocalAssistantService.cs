@@ -8,17 +8,20 @@ public sealed class LocalAssistantService
 
     private readonly CommandConfigurationService _commandConfigurationService;
     private readonly CommandExecutionService _executionService;
+    private readonly GeneralComputerControlService _generalControlService;
     private readonly LocalLlamaService _llamaService;
     private readonly AppLogService _log;
 
     public LocalAssistantService(
         CommandConfigurationService commandConfigurationService,
         CommandExecutionService executionService,
+        GeneralComputerControlService generalControlService,
         LocalLlamaService llamaService,
         AppLogService log)
     {
         _commandConfigurationService = commandConfigurationService;
         _executionService = executionService;
+        _generalControlService = generalControlService;
         _llamaService = llamaService;
         _log = log;
     }
@@ -32,6 +35,14 @@ public sealed class LocalAssistantService
 
         try
         {
+            var generalControlResult = await _generalControlService
+                .TryHandleAsync(utterance, cancellationToken)
+                .ConfigureAwait(false);
+            if (generalControlResult is not null)
+            {
+                return generalControlResult;
+            }
+
             var decision = await _llamaService
                 .DecideAsync(utterance, commands, cancellationToken)
                 .ConfigureAwait(false);

@@ -1,6 +1,6 @@
-# Bardo: asistente local
+# Bardo: controlador local unificado
 
-AlexaPc puede usar un modelo local como cerebro para interpretar lenguaje natural sin usar ninguna API de pago.
+AlexaPc incorpora el núcleo estable de ControlPCIA como biblioteca. Alexa, el relay, la interfaz WPF y el control general de Windows viven ahora en el mismo repositorio y en el mismo proceso; el ejecutable independiente de ControlPCIA ya no es necesario para las órdenes de voz.
 
 ## Flujo
 
@@ -9,128 +9,89 @@ Alexa
   -> Bardo Control
   -> relay
   -> AlexaPc.Agent
-  -> comando exacto? -> ejecutar inmediatamente
-  -> texto libre? -> Llama local
-                  -> respuesta de voz
-                  -> o selección de herramientas autorizadas
+  -> comando exacto? -> ejecución inmediata
+  -> orden de energía? -> catálogo protegido
+  -> texto libre? -> AlexaPc.Control
+                  -> control determinista
+                  -> traducción local con Qwen si hace falta
+                  -> respuesta breve por Alexa
 ```
 
-Llama nunca ejecuta código arbitrario. Solo puede seleccionar nombres ya existentes en `%LOCALAPPDATA%\AlexaPc\commands.json`.
+La Skill separa los verbos de acción en intenciones propias y vuelve a unirlos al texto reconocido. Así, `abre Chrome` llega al agente como `abre Chrome`, no como solo `Chrome`.
 
-## Servidores locales detectados
+## Qué puede controlar
 
-Con `provider: "auto"`, AlexaPc intenta en este orden:
+- Abrir y cerrar aplicaciones o direcciones web.
+- Buscar contenido en la web.
+- Maximizar, minimizar, restaurar, colocar y traer ventanas al frente.
+- Duplicar, extender y girar pantallas.
+- Reproducir, pausar, avanzar, retroceder y cambiar el volumen.
+- Consultar aplicaciones y ventanas abiertas.
+- Ejecutar varias acciones relacionadas en una sola frase.
 
-1. Ollama: `http://127.0.0.1:11434`
-2. Servidor OpenAI-compatible de LM Studio: `http://127.0.0.1:1234`
-3. Servidor OpenAI-compatible de llama.cpp: `http://127.0.0.1:8080`
+Las rutas conocidas son deterministas y no necesitan un modelo. Cuando no hay una traducción conocida, ControlPCIA consulta Ollama localmente y valida el plan antes de ejecutarlo.
 
-No se usa OpenAI ni ningún servicio remoto. `OpenAI-compatible` describe únicamente el formato HTTP que exponen algunos servidores locales.
+## Ollama
 
-Si no se especifica modelo, AlexaPc prefiere uno cuyo nombre contenga `llama`, después `qwen`, y finalmente el primer modelo cargado/disponible.
-
-## Configuración
-
-La primera vez que se inicia AlexaPc se crea:
+El traductor usa por defecto:
 
 ```text
-%LOCALAPPDATA%\AlexaPc\assistant.json
+http://127.0.0.1:11434
+qwen3.5:9b
 ```
 
-Configuración automática por defecto:
-
-```json
-{
-  "enabled": true,
-  "provider": "auto",
-  "baseUrl": null,
-  "model": null,
-  "timeoutSeconds": 5
-}
-```
-
-Para fijar Ollama y un modelo concreto:
-
-```json
-{
-  "enabled": true,
-  "provider": "ollama",
-  "baseUrl": "http://127.0.0.1:11434",
-  "model": "llama3.1:8b",
-  "timeoutSeconds": 5
-}
-```
-
-Para LM Studio o llama.cpp:
-
-```json
-{
-  "enabled": true,
-  "provider": "openai-compatible",
-  "baseUrl": "http://127.0.0.1:1234",
-  "model": null,
-  "timeoutSeconds": 5
-}
-```
-
-## Qué hace la primera versión
-
-- Los comandos exactos siguen funcionando sin pasar por Llama.
-- Una frase no reconocida se envía al modelo local.
-- Llama puede seleccionar hasta cuatro comandos autorizados para una petición compuesta.
-- Llama puede contestar preguntas breves; la respuesta vuelve por el relay y Alexa la lee.
-- Las acciones de apagar, reiniciar, suspender y bloquear requieren que la frase del usuario las pida explícitamente.
-- Si Llama inventa una herramienta que no existe en `commands.json`, AlexaPc la rechaza.
-
-Ejemplos esperados:
+Se puede cambiar con estas variables de entorno:
 
 ```text
-quiero ver YouTube
-se oye demasiado alto
-abre YouTube y baja el volumen
-necesito que pauses lo que estoy viendo
-dime qué es un agujero negro
+CONTROLPCIA_OLLAMA_URL
+CONTROLPCIA_OLLAMA_MODELO
+CONTROLPCIA_OLLAMA_RAZONAMIENTO
 ```
 
-## Restricción de latencia
+El agente precalienta al iniciar tanto el inventario de aplicaciones como el traductor local. La mayoría de órdenes habituales no pasan por Qwen y responden de forma inmediata.
 
-Alexa espera respuestas muy rápidas. Los límites están anidados para que cada capa pueda devolver un error útil antes de que expire la siguiente:
+El archivo `%LOCALAPPDATA%\AlexaPc\assistant.json` se conserva para el asistente anterior y para el tratamiento protegido de variantes de órdenes de energía. No configura el motor general integrado.
+
+## Seguridad
+
+- Las órdenes conocidas usan controladores específicos de aplicaciones, ventanas, pantallas, multimedia y web.
+- Los planes traducidos localmente pasan por validación antes de ejecutar PowerShell.
+- Se rechazan eliminaciones, movimientos o cortes de archivos, desinstalaciones y operaciones de formato o reinicialización de discos.
+- Apagar, reiniciar, suspender y bloquear quedan fuera del controlador general y requieren que el usuario lo pida explícitamente.
+
+## Latencia
+
+Alexa exige una respuesta antes de unos ocho segundos. Los límites siguen anidados:
 
 ```text
-inferencia y cola local:  máximo 5.000 ms
-Cloudflare Worker:        máximo 6.200 ms
-Lambda de Alexa:          máximo 7.200 ms
-presupuesto de Alexa:     menos de 8.000 ms
+control local:       máximo 4.800 ms
+Cloudflare Worker:   máximo 6.200 ms
+Lambda de Alexa:     máximo 7.200 ms
+presupuesto Alexa:   menos de 8.000 ms
 ```
 
-El agente precarga el modelo de Ollama al iniciar, conserva en caché el backend resuelto y pide a Ollama que mantenga el modelo cargado durante 24 horas. En modelos con razonamiento, como Qwen, se usa `think: false`: Bardo necesita una decisión JSON breve, no una cadena de razonamiento que consuma el presupuesto sin producir respuesta.
+Los eventos detallados se escriben en `%LOCALAPPDATA%\AlexaPc\logs`, incluidos la orden recibida, la ruta elegida, el estado del controlador y el tiempo empleado.
 
-Si una carga fría supera los 5 segundos, el agente devuelve un error controlado al relay y lanza una única precarga de recuperación en segundo plano. Los comandos exactos no pasan por Llama y siguen disponibles durante esa precarga.
+## Ejemplos
 
-Los eventos detallados se escriben en `%LOCALAPPDATA%\AlexaPc\logs`: recepción, ruta exacta o natural, detección/caché del backend, inferencia, herramienta, resultado y envío WebSocket.
+```text
+abre Chrome
+cierra el bloc de notas
+busca vídeos de jazz en YouTube
+maximiza Spotify y baja el volumen
+coloca Chrome en la pantalla de la derecha
+duplica las pantallas
+qué programas tengo abiertos
+```
 
 ## Pruebas
 
 ```powershell
-dotnet build AlexaPc.sln --configuration Release
+dotnet restore AlexaPc.sln
+dotnet build AlexaPc.sln --configuration Release --no-restore
+dotnet test tests/AlexaPc.Control.Tests/AlexaPc.Control.Tests.csproj --configuration Release --no-build
 node --test skill/tests/alexa-skill.test.cjs
 Push-Location cloudflare/worker
-npm ci
 npm test
-npx wrangler deploy --dry-run --outdir dist
 Pop-Location
 ```
-
-Las pruebas del Worker levantan Workerd localmente y cubren autenticación, `/health`, orden exacta, órdenes concurrentes, respuesta natural y limpieza de una petición que agota su timeout.
-
-## Próximas herramientas
-
-La arquitectura está preparada para añadir herramientas locales más ricas sin dar acceso arbitrario al sistema, por ejemplo:
-
-- abrir proyectos de Visual Studio;
-- buscar archivos;
-- consultar `git status`;
-- abrir proyectos concretos de ChatGPT en el navegador;
-- rutinas como `voy a dibujar` o `voy a tocar la batería`;
-- memoria local y recordatorios;
-- información del sistema y procesos.

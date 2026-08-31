@@ -12,14 +12,17 @@ Alexa
   -> Cloudflare relay
   -> AlexaPc.Agent
   -> comando exacto? -> ejecución inmediata
-  -> texto libre? -> Llama local
+  -> orden de energía? -> catálogo protegido
+  -> texto libre? -> AlexaPc.Control
+                  -> control determinista de Windows
+                  -> traducción local con Qwen cuando hace falta
                   -> respuesta breve por Alexa
-                  -> o herramientas autorizadas en Windows
 ```
 
 Componentes:
 
 - `AlexaPc.Agent`: aplicación WPF que ejecuta acciones en Windows y aloja el cerebro local.
+- `AlexaPc.Control`: motor integrado de ControlPCIA para aplicaciones, ventanas, pantallas, multimedia, web y órdenes compuestas.
 - `AlexaPc.Relay`: relay HTTP/WebSocket para desarrollo local.
 - Cloudflare Worker: relay público persistente entre Alexa y el ordenador.
 - Alexa Custom Skill `Bardo Control`.
@@ -37,12 +40,13 @@ Componentes:
 - Relay WebSocket persistente con reconexión automática.
 - Modelo de Skill en español (`bardo control`).
 - Lambda puente entre Alexa y el relay.
-- Interpretación de lenguaje natural mediante Llama local.
+- Control general del ordenador con lenguaje natural mediante el motor integrado de ControlPCIA.
 - Detección automática de Ollama, LM Studio y llama.cpp.
-- Precarga de Ollama, caché del backend y modelo residente para evitar latencia fría.
-- Respuestas breves de Llama leídas por Alexa.
-- Selección de hasta cuatro herramientas autorizadas para peticiones compuestas.
-- Rechazo de herramientas inventadas y protección adicional para acciones de energía.
+- Apertura y cierre de aplicaciones, gestión de ventanas y pantallas, multimedia, búsquedas web y órdenes compuestas.
+- Precarga de inventario y del traductor local para evitar latencia fría.
+- Reconstrucción del verbo en la Skill para que `abre Chrome` no llegue al ordenador como solo `Chrome`.
+- Respuestas breves del controlador local leídas por Alexa.
+- Validación de las acciones traducidas y protección adicional para acciones de energía.
 - Build automática con GitHub Actions.
 - Pruebas de integración del Worker con WebSocket, Durable Objects, concurrencia y timeout.
 
@@ -88,12 +92,13 @@ Si se abre YouTube, funciona el recorrido básico:
 HTTP -> Relay -> WebSocket -> Agent -> CommandDispatcher -> Windows
 ```
 
-Una petición que no coincida con un nombre de `commands.json` pasa al asistente local. Por ejemplo, con Ollama/LM Studio/llama.cpp arrancado:
+Una petición que no coincida con un nombre de `commands.json` pasa al controlador general integrado. Por ejemplo:
 
 ```text
-quiero ver YouTube
-abre YouTube y baja el volumen
-dime qué es un agujero negro
+abre Chrome
+busca vídeos de jazz en YouTube
+maximiza Spotify y baja el volumen
+qué programas tengo abiertos
 ```
 
 ## Alexa
@@ -121,9 +126,9 @@ abre YouTube
 O lenguaje más natural:
 
 ```text
-quiero ver YouTube
-necesito bajar el volumen
-dime qué es un agujero negro
+quiero que abras YouTube
+necesito que bajes el volumen
+trae Spotify al frente y pausa la reproducción
 ```
 
 También puede usarse en una sola frase:
@@ -137,20 +142,12 @@ La elección del nombre de dos palabras y el diagnóstico de las invocaciones es
 
 ## Seguridad
 
-Llama no recibe capacidad para ejecutar código arbitrario. Solo puede elegir nombres existentes en `%LOCALAPPDATA%\AlexaPc\commands.json`.
+Las órdenes conocidas usan controladores deterministas. Si una orden necesita traducción local, el modelo solo propone un plan que pasa por los validadores de ControlPCIA antes de ejecutarse; se bloquean operaciones destructivas sobre archivos y discos.
 
-Las acciones de apagar, reiniciar, suspender y bloquear requieren además una petición explícita del usuario; una inferencia indirecta del modelo no basta.
+Las acciones de apagar, reiniciar, suspender y bloquear no pasan por el controlador general: siguen en el catálogo protegido y requieren una petición explícita del usuario.
 
-## Dirección del proyecto
+## Proyecto unificado
 
-La siguiente fase es ampliar el catálogo de herramientas seguras de Bardo:
+AlexaPc ya contiene el núcleo estable de ControlPCIA como biblioteca. No hace falta instalar ni mantener un segundo ejecutable para que las órdenes de Alexa controlen Windows. El servidor móvil y la APK de ControlPCIA quedan fuera de esta integración porque no forman parte del recorrido Alexa → ordenador.
 
-- abrir soluciones y proyectos de trabajo;
-- buscar archivos y consultar Git;
-- abrir proyectos concretos de ChatGPT en el navegador;
-- crear rutinas compuestas como `voy a dibujar` o `voy a tocar la batería`;
-- memoria local;
-- estado del sistema y procesos;
-- selección inteligente de herramientas por Llama.
-
-El objetivo es que Alexa sea la interfaz de voz y Bardo/Llama el cerebro local del ordenador.
+El objetivo es que Alexa sea la interfaz de voz y Bardo/ControlPCIA el controlador local del ordenador.

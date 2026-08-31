@@ -174,4 +174,4 @@ sin dependencias adicionales:
 node --test .\skill\tests\alexa-skill.test.cjs
 ```
 
-Los nombres recibidos deben corresponder a comandos de `commands.json`. AlexaPc nunca acepta código arbitrario desde Internet.
+Los comandos exactos siguen resolviéndose desde `commands.json`. Las demás frases se envían como texto al controlador local integrado, que usa rutas deterministas o un plan traducido y validado localmente. El relay nunca envía código para ejecutar.

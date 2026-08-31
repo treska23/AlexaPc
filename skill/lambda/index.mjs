@@ -23,6 +23,11 @@ export const handler = async (event) => {
       return executeAndRespond(fixedCommand);
     }
 
+    const naturalAction = commandForActionIntent(request.intent);
+    if (naturalAction) {
+      return executeAndRespond(naturalAction);
+    }
+
     const naturalQuestion = commandForQuestionIntent(request.intent);
     if (naturalQuestion) {
       return executeAndRespond(naturalQuestion);
@@ -40,7 +45,7 @@ export const handler = async (event) => {
 
     if (intentName === "AMAZON.HelpIntent") {
       return ask(
-        "Puedes darme órdenes del ordenador o hablarme de forma natural. Si no reconozco un comando directo, lo intentará entender el asistente local.",
+        "Puedes pedirme que abra aplicaciones, busque en Internet, controle ventanas, pantallas o reproducción y encadene varias acciones.",
         "¿Qué quieres que haga?"
       );
     }
@@ -50,7 +55,7 @@ export const handler = async (event) => {
     }
 
     if (intentName === "AMAZON.FallbackIntent") {
-      return ask("No he reconocido esa petición de Bardo Control.", "Prueba a decir quiero, necesito, dime o abre, seguido de lo que quieras.");
+      return ask("No he reconocido la orden para el ordenador.", "Prueba a decir abre, cierra, busca, pon, cambia o dime, seguido de lo que quieras.");
     }
   }
 
@@ -63,6 +68,36 @@ export const handler = async (event) => {
 
 function getCommandSlotValue(request) {
   return request.intent?.slots?.command?.value?.trim() || null;
+}
+
+export function commandForActionIntent(intent) {
+  const definitions = {
+    OpenComputerIntent: { slot: "target", prefix: "abre" },
+    CloseComputerIntent: { slot: "target", prefix: "cierra" },
+    SearchComputerIntent: { slot: "query", prefix: "busca" },
+    SetComputerIntent: { slot: "instruction", prefix: "pon" },
+    ChangeComputerIntent: { slot: "instruction", prefix: "cambia" },
+    ActivateComputerIntent: { slot: "target", prefix: "activa" },
+    DeactivateComputerIntent: { slot: "target", prefix: "desactiva" },
+    MaximizeWindowIntent: { slot: "target", prefix: "maximiza" },
+    MinimizeWindowIntent: { slot: "target", prefix: "minimiza" },
+    RestoreWindowIntent: { slot: "target", prefix: "restaura" },
+    BringWindowIntent: { slot: "target", prefix: "trae", suffix: "al frente" },
+    PlaceWindowIntent: { slot: "instruction", prefix: "coloca" },
+    DuplicateDisplaysIntent: { slot: "target", prefix: "duplica" },
+    ExtendDisplaysIntent: { slot: "target", prefix: "extiende" },
+    RotateDisplayIntent: { slot: "target", prefix: "gira" },
+    ForwardMediaIntent: { slot: "target", prefix: "adelanta" },
+    RewindMediaIntent: { slot: "target", prefix: "retrocede" },
+    WhatComputerIntent: { slot: "query", prefix: "qué" }
+  };
+  const definition = definitions[intent?.name];
+  const value = definition ? intent?.slots?.[definition.slot]?.value?.trim() : null;
+  if (!value) {
+    return null;
+  }
+
+  return `${definition.prefix} ${value}${definition.suffix ? ` ${definition.suffix}` : ""}`;
 }
 
 export function commandForQuestionIntent(intent) {
@@ -89,7 +124,9 @@ function logRequest(request) {
     locale: request.locale ?? null,
     intentName: isIntentRequest ? request.intent?.name ?? null : null,
     command: isIntentRequest
-      ? getCommandSlotValue(request) ?? commandForQuestionIntent(request.intent)
+      ? getCommandSlotValue(request)
+        ?? commandForActionIntent(request.intent)
+        ?? commandForQuestionIntent(request.intent)
       : null
   };
 
