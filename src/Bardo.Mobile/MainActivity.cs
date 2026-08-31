@@ -159,9 +159,13 @@ public sealed class MainActivity : Activity
 
         var running = BardoVoiceService.IsRunning;
         var serviceStatus = BardoVoiceService.CurrentStatus;
+        var rms = float.IsNaN(BardoVoiceService.LastRmsDb)
+            ? "sin señal"
+            : $"{BardoVoiceService.LastRmsDb:0.0} dB";
+        var recognizerEvent = BardoVoiceService.LastRecognizerEvent;
 
         SetStatus(
-            $"Micro={microphoneGranted} · Voz sistema={standardAvailable} · Voz local={onDeviceAvailable} · Servicio={running} · {serviceStatus}");
+            $"Micro={microphoneGranted} · Voz sistema={standardAvailable} · Voz local={onDeviceAvailable} · Servicio={running} · RMS={rms} · Evento={recognizerEvent} · {serviceStatus}");
     }
 
     public override void OnRequestPermissionsResult(
