@@ -176,9 +176,9 @@ public sealed class MainActivity : Activity
 
         var field = new EditText(this)
         {
-            Text = value,
-            SingleLine = true
+            Text = value
         };
+        field.SetSingleLine(true);
         parent.AddView(field, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MatchParent,
             LinearLayout.LayoutParams.WrapContent));
